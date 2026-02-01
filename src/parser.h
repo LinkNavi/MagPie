@@ -27,6 +27,7 @@
 // ------------------------------------------------------------
 
 #include "token.h"
+#include "lexer.h"
 #include "ast.h"
 
 #include <string>

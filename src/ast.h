@@ -40,6 +40,7 @@
 #include <memory>
 #include <optional>
 #include <variant>
+#include <ostream>
 
 namespace scriptlang {
 
@@ -97,6 +98,52 @@ enum class AssignOp {
     StarAssign,     // *=
     SlashAssign,    // /=
 };
+
+// ------------------------------------------------------------
+// Stream operators for operator enums — needed so EXPECT_EQ
+// can print these types in test failure messages.
+// ------------------------------------------------------------
+
+inline std::ostream& operator<<(std::ostream& os, BinaryOp op) {
+    switch (op) {
+        case BinaryOp::Add:            return os << "BinaryOp::Add";
+        case BinaryOp::Sub:            return os << "BinaryOp::Sub";
+        case BinaryOp::Mul:            return os << "BinaryOp::Mul";
+        case BinaryOp::Div:            return os << "BinaryOp::Div";
+        case BinaryOp::Mod:            return os << "BinaryOp::Mod";
+        case BinaryOp::Equal:          return os << "BinaryOp::Equal";
+        case BinaryOp::NotEqual:       return os << "BinaryOp::NotEqual";
+        case BinaryOp::Less:           return os << "BinaryOp::Less";
+        case BinaryOp::LessEqual:      return os << "BinaryOp::LessEqual";
+        case BinaryOp::Greater:        return os << "BinaryOp::Greater";
+        case BinaryOp::GreaterEqual:   return os << "BinaryOp::GreaterEqual";
+        case BinaryOp::And:            return os << "BinaryOp::And";
+        case BinaryOp::Or:             return os << "BinaryOp::Or";
+        case BinaryOp::NullCoalesce:   return os << "BinaryOp::NullCoalesce";
+        case BinaryOp::Range:          return os << "BinaryOp::Range";
+        case BinaryOp::RangeInclusive: return os << "BinaryOp::RangeInclusive";
+    }
+    return os << "BinaryOp(<unknown>)";
+}
+
+inline std::ostream& operator<<(std::ostream& os, UnaryOp op) {
+    switch (op) {
+        case UnaryOp::Negate: return os << "UnaryOp::Negate";
+        case UnaryOp::Not:    return os << "UnaryOp::Not";
+    }
+    return os << "UnaryOp(<unknown>)";
+}
+
+inline std::ostream& operator<<(std::ostream& os, AssignOp op) {
+    switch (op) {
+        case AssignOp::Assign:      return os << "AssignOp::Assign";
+        case AssignOp::PlusAssign:  return os << "AssignOp::PlusAssign";
+        case AssignOp::MinusAssign: return os << "AssignOp::MinusAssign";
+        case AssignOp::StarAssign:  return os << "AssignOp::StarAssign";
+        case AssignOp::SlashAssign: return os << "AssignOp::SlashAssign";
+    }
+    return os << "AssignOp(<unknown>)";
+}
 
 // ============================================================
 // Type annotation — lightweight, no resolution yet.
@@ -182,6 +229,23 @@ enum class LiteralKind {
     False,
     Null,
 };
+
+inline std::ostream& operator<<(std::ostream& os, LiteralKind kind) {
+    switch (kind) {
+        case LiteralKind::Integer:       return os << "LiteralKind::Integer";
+        case LiteralKind::HexInteger:    return os << "LiteralKind::HexInteger";
+        case LiteralKind::BinaryInteger: return os << "LiteralKind::BinaryInteger";
+        case LiteralKind::Float:         return os << "LiteralKind::Float";
+        case LiteralKind::Scientific:    return os << "LiteralKind::Scientific";
+        case LiteralKind::String:        return os << "LiteralKind::String";
+        case LiteralKind::RawString:     return os << "LiteralKind::RawString";
+        case LiteralKind::Char:          return os << "LiteralKind::Char";
+        case LiteralKind::True:          return os << "LiteralKind::True";
+        case LiteralKind::False:         return os << "LiteralKind::False";
+        case LiteralKind::Null:          return os << "LiteralKind::Null";
+    }
+    return os << "LiteralKind(<unknown>)";
+}
 
 struct LiteralExpr : Expression {
     LiteralKind kind;
