@@ -17,6 +17,8 @@ amalgamator = find_program('tools/amalgamate.py')
 # Add new headers to this list as you create them.
 source_headers = files(
     'src/token.h',
+    'src/ast.h',
+    'src/parser.h',
     'src/lexer.h',
 )
 
@@ -45,6 +47,7 @@ scriptlang_dep = declare_dependency(
 # ---------------------------------------------------------------------------
 test_sources = files(
     'tests/test_lexer.cpp',
+    'tests/test_parser.cpp',
 )
 
 test_exe = executable(
