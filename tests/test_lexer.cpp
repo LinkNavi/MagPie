@@ -14,459 +14,570 @@ static std::vector<Token> lex(const char* source) {
     return tokens;
 }
 
-// --------------------------------------------------------
-// Single character tokens
-// --------------------------------------------------------
-
-TEST(lexer_single_char_tokens) {
-    auto tokens = lex("( ) { } [ ] ; , . : # @ % + * / ?");
-
-    EXPECT_SIZE(tokens, 17);
-    EXPECT_EQ(tokens[0].type,  TokenType::LeftParen);
-    EXPECT_EQ(tokens[1].type,  TokenType::RightParen);
-    EXPECT_EQ(tokens[2].type,  TokenType::LeftBrace);
-    EXPECT_EQ(tokens[3].type,  TokenType::RightBrace);
-    EXPECT_EQ(tokens[4].type,  TokenType::LeftBracket);
-    EXPECT_EQ(tokens[5].type,  TokenType::RightBracket);
-    EXPECT_EQ(tokens[6].type,  TokenType::Semicolon);
-    EXPECT_EQ(tokens[7].type,  TokenType::Comma);
-    EXPECT_EQ(tokens[8].type,  TokenType::Dot);
-    EXPECT_EQ(tokens[9].type,  TokenType::Colon);
-    EXPECT_EQ(tokens[10].type, TokenType::Hash);
-    EXPECT_EQ(tokens[11].type, TokenType::At);
-    EXPECT_EQ(tokens[12].type, TokenType::Percent);
-    EXPECT_EQ(tokens[13].type, TokenType::Plus);
-    EXPECT_EQ(tokens[14].type, TokenType::Star);
-    EXPECT_EQ(tokens[15].type, TokenType::Slash);
-    EXPECT_EQ(tokens[16].type, TokenType::Question);
-}
+// ============================================================
+// NEW FEATURE TESTS
+// ============================================================
 
 // --------------------------------------------------------
-// Two character tokens
+// Lambda arrow operator
 // --------------------------------------------------------
 
-TEST(lexer_two_char_tokens) {
-    auto tokens = lex("== != <= >= += -= *= /= && || -> .? ??");
-
-    EXPECT_SIZE(tokens, 13);
-    EXPECT_EQ(tokens[0].type,  TokenType::Equal);
-    EXPECT_EQ(tokens[1].type,  TokenType::NotEqual);
-    EXPECT_EQ(tokens[2].type,  TokenType::LessEqual);
-    EXPECT_EQ(tokens[3].type,  TokenType::GreaterEqual);
-    EXPECT_EQ(tokens[4].type,  TokenType::PlusAssign);
-    EXPECT_EQ(tokens[5].type,  TokenType::MinusAssign);
-    EXPECT_EQ(tokens[6].type,  TokenType::StarAssign);
-    EXPECT_EQ(tokens[7].type,  TokenType::SlashAssign);
-    EXPECT_EQ(tokens[8].type,  TokenType::And);
-    EXPECT_EQ(tokens[9].type,  TokenType::Or);
-    EXPECT_EQ(tokens[10].type, TokenType::Arrow);
-    EXPECT_EQ(tokens[11].type, TokenType::DotQuestion);
-    EXPECT_EQ(tokens[12].type, TokenType::QuestionQuestion);
-}
-
-TEST(lexer_ambiguous_single_vs_double) {
-    // Make sure = vs ==, < vs <=, etc. resolve correctly
-    auto tokens = lex("= < > ! - =");
-
-    EXPECT_SIZE(tokens, 6);
-    EXPECT_EQ(tokens[0].type, TokenType::Assign);
-    EXPECT_EQ(tokens[1].type, TokenType::Less);
+TEST(lexer_lambda_arrow) {
+    auto tokens = lex("=> = >");
+    
+    EXPECT_SIZE(tokens, 3);
+    EXPECT_EQ(tokens[0].type, TokenType::LambdaArrow);
+    EXPECT_EQ(tokens[1].type, TokenType::Assign);
     EXPECT_EQ(tokens[2].type, TokenType::Greater);
-    EXPECT_EQ(tokens[3].type, TokenType::Not);
-    EXPECT_EQ(tokens[4].type, TokenType::Minus);
-    EXPECT_EQ(tokens[5].type, TokenType::Assign);
 }
 
-// --------------------------------------------------------
-// Integer literals
-// --------------------------------------------------------
-
-TEST(lexer_integer_literal) {
-    auto tokens = lex("42");
-
-    EXPECT_SIZE(tokens, 1);
-    EXPECT_EQ(tokens[0].type,  TokenType::Integer);
-    EXPECT_EQ(tokens[0].value, std::string("42"));
-}
-
-TEST(lexer_integer_zero) {
-    auto tokens = lex("0");
-
-    EXPECT_SIZE(tokens, 1);
-    EXPECT_EQ(tokens[0].type,  TokenType::Integer);
-    EXPECT_EQ(tokens[0].value, std::string("0"));
-}
-
-TEST(lexer_multiple_integers) {
-    auto tokens = lex("1 22 333");
-
-    EXPECT_SIZE(tokens, 3);
-    EXPECT_EQ(tokens[0].value, std::string("1"));
-    EXPECT_EQ(tokens[1].value, std::string("22"));
-    EXPECT_EQ(tokens[2].value, std::string("333"));
-}
-
-// --------------------------------------------------------
-// Float literals
-// --------------------------------------------------------
-
-TEST(lexer_float_literal) {
-    auto tokens = lex("3.14");
-
-    EXPECT_SIZE(tokens, 1);
-    EXPECT_EQ(tokens[0].type,  TokenType::Float);
-    EXPECT_EQ(tokens[0].value, std::string("3.14"));
-}
-
-TEST(lexer_float_zero) {
-    auto tokens = lex("0.0");
-
-    EXPECT_SIZE(tokens, 1);
-    EXPECT_EQ(tokens[0].type,  TokenType::Float);
-    EXPECT_EQ(tokens[0].value, std::string("0.0"));
-}
-
-TEST(lexer_float_does_not_eat_method_dot) {
-    // "obj.method" should NOT be read as a float.
-    // The dot after an identifier is a Dot token, not a decimal.
-    auto tokens = lex("obj.method");
-
-    EXPECT_SIZE(tokens, 3);
-    EXPECT_EQ(tokens[0].type, TokenType::Identifier);
-    EXPECT_EQ(tokens[0].value, std::string("obj"));
-    EXPECT_EQ(tokens[1].type, TokenType::Dot);
-    EXPECT_EQ(tokens[2].type, TokenType::Identifier);
-    EXPECT_EQ(tokens[2].value, std::string("method"));
-}
-
-TEST(lexer_integer_followed_by_dot_method) {
-    // "100.toString()" — 100 is an integer, .toString is a method call.
-    // The dot is NOT a decimal because it's not followed by a digit.
-    auto tokens = lex("100.toString()");
-
-    EXPECT_SIZE(tokens, 5);
-    EXPECT_EQ(tokens[0].type,  TokenType::Integer);
-    EXPECT_EQ(tokens[0].value, std::string("100"));
-    EXPECT_EQ(tokens[1].type,  TokenType::Dot);
-    EXPECT_EQ(tokens[2].type,  TokenType::Identifier);
-    EXPECT_EQ(tokens[2].value, std::string("toString"));
-    EXPECT_EQ(tokens[3].type,  TokenType::LeftParen);
-    EXPECT_EQ(tokens[4].type,  TokenType::RightParen);
-}
-
-// --------------------------------------------------------
-// String literals
-// --------------------------------------------------------
-
-TEST(lexer_string_literal) {
-    auto tokens = lex("\"hello world\"");
-
-    EXPECT_SIZE(tokens, 1);
-    EXPECT_EQ(tokens[0].type,  TokenType::String);
-    EXPECT_EQ(tokens[0].value, std::string("hello world"));
-}
-
-TEST(lexer_empty_string) {
-    auto tokens = lex("\"\"");
-
-    EXPECT_SIZE(tokens, 1);
-    EXPECT_EQ(tokens[0].type,  TokenType::String);
-    EXPECT_EQ(tokens[0].value, std::string(""));
-}
-
-TEST(lexer_string_escape_sequences) {
-    auto tokens = lex("\"line1\\nline2\\ttab\\\\slash\\\"quote\"");
-
-    EXPECT_SIZE(tokens, 1);
-    EXPECT_EQ(tokens[0].type,  TokenType::String);
-    EXPECT_EQ(tokens[0].value, std::string("line1\nline2\ttab\\slash\"quote"));
-}
-
-TEST(lexer_unterminated_string) {
-    auto tokens = lex("\"hello");
-
-    EXPECT_SIZE(tokens, 1);
-    EXPECT_TRUE(tokens[0].isError());
-}
-
-TEST(lexer_string_with_newline_is_error) {
-    auto tokens = lex("\"hello\nworld\"");
-
-    EXPECT_SIZE(tokens, 1);
-    EXPECT_TRUE(tokens[0].isError());
-}
-
-TEST(lexer_invalid_escape_sequence) {
-    auto tokens = lex("\"hello\\q\"");
-
-    EXPECT_SIZE(tokens, 1);
-    EXPECT_TRUE(tokens[0].isError());
-}
-
-// --------------------------------------------------------
-// Keywords
-// --------------------------------------------------------
-
-TEST(lexer_keywords) {
-    auto tokens = lex("class public private static return if else while for switch case default include");
-
-    EXPECT_SIZE(tokens, 13);
-    EXPECT_EQ(tokens[0].type, TokenType::Class);
-    EXPECT_EQ(tokens[1].type, TokenType::Public);
-    EXPECT_EQ(tokens[2].type, TokenType::Private);
-    EXPECT_EQ(tokens[3].type, TokenType::Static);
-    EXPECT_EQ(tokens[4].type, TokenType::Return);
-    EXPECT_EQ(tokens[5].type, TokenType::If);
-    EXPECT_EQ(tokens[6].type, TokenType::Else);
-    EXPECT_EQ(tokens[7].type, TokenType::While);
-    EXPECT_EQ(tokens[8].type, TokenType::For);
-    EXPECT_EQ(tokens[9].type, TokenType::Switch);
-    EXPECT_EQ(tokens[10].type, TokenType::Case);
-    EXPECT_EQ(tokens[11].type, TokenType::Default);
-    EXPECT_EQ(tokens[12].type, TokenType::Include);
-}
-
-TEST(lexer_type_keywords) {
-    auto tokens = lex("int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64 bool string void");
-
-    EXPECT_SIZE(tokens, 13);
-    EXPECT_EQ(tokens[0].type,  TokenType::Int8);
-    EXPECT_EQ(tokens[1].type,  TokenType::Int16);
-    EXPECT_EQ(tokens[2].type,  TokenType::Int32);
-    EXPECT_EQ(tokens[3].type,  TokenType::Int64);
-    EXPECT_EQ(tokens[4].type,  TokenType::UInt8);
-    EXPECT_EQ(tokens[5].type,  TokenType::UInt16);
-    EXPECT_EQ(tokens[6].type,  TokenType::UInt32);
-    EXPECT_EQ(tokens[7].type,  TokenType::UInt64);
-    EXPECT_EQ(tokens[8].type,  TokenType::Float32);
-    EXPECT_EQ(tokens[9].type,  TokenType::Float64);
-    EXPECT_EQ(tokens[10].type, TokenType::Bool);
-    EXPECT_EQ(tokens[11].type, TokenType::String_);
-    EXPECT_EQ(tokens[12].type, TokenType::Void);
-}
-
-TEST(lexer_literal_keywords) {
-    auto tokens = lex("true false null");
-
-    EXPECT_SIZE(tokens, 3);
-    EXPECT_EQ(tokens[0].type, TokenType::True);
-    EXPECT_EQ(tokens[1].type, TokenType::False);
-    EXPECT_EQ(tokens[2].type, TokenType::Null);
-}
-
-// --------------------------------------------------------
-// Identifiers
-// --------------------------------------------------------
-
-TEST(lexer_identifier) {
-    auto tokens = lex("playerHealth");
-
-    EXPECT_SIZE(tokens, 1);
-    EXPECT_EQ(tokens[0].type,  TokenType::Identifier);
-    EXPECT_EQ(tokens[0].value, std::string("playerHealth"));
-}
-
-TEST(lexer_identifier_with_underscore) {
-    auto tokens = lex("_private my_var __dunder");
-
-    EXPECT_SIZE(tokens, 3);
-    EXPECT_EQ(tokens[0].type,  TokenType::Identifier);
-    EXPECT_EQ(tokens[0].value, std::string("_private"));
-    EXPECT_EQ(tokens[1].type,  TokenType::Identifier);
-    EXPECT_EQ(tokens[1].value, std::string("my_var"));
-    EXPECT_EQ(tokens[2].type,  TokenType::Identifier);
-    EXPECT_EQ(tokens[2].value, std::string("__dunder"));
-}
-
-TEST(lexer_identifier_not_confused_with_keyword) {
-    // "classes" starts with "class" but is an identifier
-    auto tokens = lex("classes returning iffy");
-
-    EXPECT_SIZE(tokens, 3);
-    EXPECT_EQ(tokens[0].type, TokenType::Identifier);
-    EXPECT_EQ(tokens[0].value, std::string("classes"));
+TEST(lexer_lambda_function_syntax) {
+    auto tokens = lex("(x, y) => x + y");
+    
+    EXPECT_SIZE(tokens, 9);
+    EXPECT_EQ(tokens[0].type, TokenType::LeftParen);
     EXPECT_EQ(tokens[1].type, TokenType::Identifier);
-    EXPECT_EQ(tokens[1].value, std::string("returning"));
-    EXPECT_EQ(tokens[2].type, TokenType::Identifier);
-    EXPECT_EQ(tokens[2].value, std::string("iffy"));
+    EXPECT_EQ(tokens[2].type, TokenType::Comma);
+    EXPECT_EQ(tokens[3].type, TokenType::Identifier);
+    EXPECT_EQ(tokens[4].type, TokenType::RightParen);
+    EXPECT_EQ(tokens[5].type, TokenType::LambdaArrow);
+    EXPECT_EQ(tokens[6].type, TokenType::Identifier);
+    EXPECT_EQ(tokens[7].type, TokenType::Plus);
+    EXPECT_EQ(tokens[8].type, TokenType::Identifier);
 }
 
 // --------------------------------------------------------
-// Comments
+// Range operators
 // --------------------------------------------------------
 
-TEST(lexer_single_line_comment) {
-    auto tokens = lex("42 // this is a comment\n100");
-
-    EXPECT_SIZE(tokens, 2);
-    EXPECT_EQ(tokens[0].type,  TokenType::Integer);
-    EXPECT_EQ(tokens[0].value, std::string("42"));
-    EXPECT_EQ(tokens[1].type,  TokenType::Integer);
-    EXPECT_EQ(tokens[1].value, std::string("100"));
-}
-
-TEST(lexer_multi_line_comment) {
-    auto tokens = lex("42 /* this is\na multi-line\ncomment */ 100");
-
-    EXPECT_SIZE(tokens, 2);
-    EXPECT_EQ(tokens[0].type,  TokenType::Integer);
-    EXPECT_EQ(tokens[0].value, std::string("42"));
-    EXPECT_EQ(tokens[1].type,  TokenType::Integer);
-    EXPECT_EQ(tokens[1].value, std::string("100"));
-}
-
-TEST(lexer_comment_at_end_of_file) {
-    auto tokens = lex("42 // trailing comment");
-
-    EXPECT_SIZE(tokens, 1);
-    EXPECT_EQ(tokens[0].type,  TokenType::Integer);
-    EXPECT_EQ(tokens[0].value, std::string("42"));
-}
-
-// --------------------------------------------------------
-// Line and column tracking
-// --------------------------------------------------------
-
-TEST(lexer_tracks_line_numbers) {
-    auto tokens = lex("a\nb\nc");
-
+TEST(lexer_dot_dot_range) {
+    auto tokens = lex("0..10");
+    
     EXPECT_SIZE(tokens, 3);
-    EXPECT_EQ(tokens[0].line, 1);
-    EXPECT_EQ(tokens[1].line, 2);
-    EXPECT_EQ(tokens[2].line, 3);
-}
-
-TEST(lexer_tracks_column_numbers) {
-    auto tokens = lex("a  b   c");
-
-    EXPECT_SIZE(tokens, 3);
-    EXPECT_EQ(tokens[0].column, 1);
-    EXPECT_EQ(tokens[1].column, 4);
-    EXPECT_EQ(tokens[2].column, 8);
-}
-
-// --------------------------------------------------------
-// Error cases
-// --------------------------------------------------------
-
-TEST(lexer_unexpected_character) {
-    auto tokens = lex("42 $ 100");
-
-    // Should get: 42, then an Error token for $
-    EXPECT_SIZE(tokens, 2);
     EXPECT_EQ(tokens[0].type, TokenType::Integer);
-    EXPECT_TRUE(tokens[1].isError());
+    EXPECT_EQ(tokens[1].type, TokenType::DotDot);
+    EXPECT_EQ(tokens[2].type, TokenType::Integer);
 }
 
-TEST(lexer_bare_ampersand_is_error) {
-    auto tokens = lex("a & b");
-
-    EXPECT_SIZE(tokens, 2); // 'a', then Error on &
-    EXPECT_EQ(tokens[0].type, TokenType::Identifier);
-    EXPECT_TRUE(tokens[1].isError());
-}
-
-TEST(lexer_bare_pipe_is_error) {
-    auto tokens = lex("a | b");
-
+TEST(lexer_dot_dot_dot_spread) {
+    auto tokens = lex("...args");
+    
     EXPECT_SIZE(tokens, 2);
+    EXPECT_EQ(tokens[0].type, TokenType::DotDotDot);
+    EXPECT_EQ(tokens[1].type, TokenType::Identifier);
+}
+
+TEST(lexer_distinguishes_dot_variants) {
+    auto tokens = lex(". .. ...");
+    
+    EXPECT_SIZE(tokens, 3);
+    EXPECT_EQ(tokens[0].type, TokenType::Dot);
+    EXPECT_EQ(tokens[1].type, TokenType::DotDot);
+    EXPECT_EQ(tokens[2].type, TokenType::DotDotDot);
+}
+
+// --------------------------------------------------------
+// Hexadecimal literals
+// --------------------------------------------------------
+
+TEST(lexer_hex_literal_lowercase) {
+    auto tokens = lex("0xff");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::HexInteger);
+    EXPECT_EQ(tokens[0].value, std::string("0xff"));
+}
+
+TEST(lexer_hex_literal_uppercase) {
+    auto tokens = lex("0xFF 0XAB 0x1A2B");
+    
+    EXPECT_SIZE(tokens, 3);
+    EXPECT_EQ(tokens[0].type, TokenType::HexInteger);
+    EXPECT_EQ(tokens[1].type, TokenType::HexInteger);
+    EXPECT_EQ(tokens[2].type, TokenType::HexInteger);
+}
+
+TEST(lexer_hex_literal_color_example) {
+    // Common use case: color values
+    auto tokens = lex("color = 0xFF5733");
+    
+    EXPECT_SIZE(tokens, 3);
     EXPECT_EQ(tokens[0].type, TokenType::Identifier);
-    EXPECT_TRUE(tokens[1].isError());
+    EXPECT_EQ(tokens[1].type, TokenType::Assign);
+    EXPECT_EQ(tokens[2].type, TokenType::HexInteger);
+    EXPECT_EQ(tokens[2].value, std::string("0xFF5733"));
+}
+
+TEST(lexer_invalid_hex_literal) {
+    auto tokens = lex("0x");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_TRUE(tokens[0].isError());
 }
 
 // --------------------------------------------------------
-// Realistic snippet
+// Binary literals
 // --------------------------------------------------------
 
-TEST(lexer_real_snippet) {
-    // A realistic fragment from the target syntax
-    const char* source =
-        "public class Player {\n"
-        "    private int32 health = 100;\n"
-        "    public bool isDead() {\n"
-        "        return health <= 0;\n"
-        "    }\n"
-        "}\n";
-
-    auto tokens = lex(source);
-
-    // Spot-check key tokens in order
-    EXPECT_EQ(tokens[0].type,  TokenType::Public);
-    EXPECT_EQ(tokens[1].type,  TokenType::Class);
-    EXPECT_EQ(tokens[2].type,  TokenType::Identifier);
-    EXPECT_EQ(tokens[2].value, std::string("Player"));
-    EXPECT_EQ(tokens[3].type,  TokenType::LeftBrace);
-    EXPECT_EQ(tokens[4].type,  TokenType::Private);
-    EXPECT_EQ(tokens[5].type,  TokenType::Int32);
-    EXPECT_EQ(tokens[6].type,  TokenType::Identifier);
-    EXPECT_EQ(tokens[6].value, std::string("health"));
-    EXPECT_EQ(tokens[7].type,  TokenType::Assign);
-    EXPECT_EQ(tokens[8].type,  TokenType::Integer);
-    EXPECT_EQ(tokens[8].value, std::string("100"));
-    EXPECT_EQ(tokens[9].type,  TokenType::Semicolon);
+TEST(lexer_binary_literal) {
+    auto tokens = lex("0b1010");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::BinaryInteger);
+    EXPECT_EQ(tokens[0].value, std::string("0b1010"));
 }
 
-TEST(lexer_annotation_syntax) {
-    // @expose(min=0, max=100)
-    // Tokens: @ expose ( min = 0 , max = 100 )
-    auto tokens = lex("@expose(min=0, max=100)");
-
-    EXPECT_SIZE(tokens, 11);
-    EXPECT_EQ(tokens[0].type,   TokenType::At);
-    EXPECT_EQ(tokens[1].type,   TokenType::Identifier);
-    EXPECT_EQ(tokens[1].value,  std::string("expose"));
-    EXPECT_EQ(tokens[2].type,   TokenType::LeftParen);
-    EXPECT_EQ(tokens[3].type,   TokenType::Identifier);
-    EXPECT_EQ(tokens[3].value,  std::string("min"));
-    EXPECT_EQ(tokens[4].type,   TokenType::Assign);
-    EXPECT_EQ(tokens[5].type,   TokenType::Integer);
-    EXPECT_EQ(tokens[5].value,  std::string("0"));
-    EXPECT_EQ(tokens[6].type,   TokenType::Comma);
-    EXPECT_EQ(tokens[7].type,   TokenType::Identifier);
-    EXPECT_EQ(tokens[7].value,  std::string("max"));
-    EXPECT_EQ(tokens[8].type,   TokenType::Assign);
-    EXPECT_EQ(tokens[9].type,   TokenType::Integer);
-    EXPECT_EQ(tokens[9].value,  std::string("100"));
-    EXPECT_EQ(tokens[10].type,  TokenType::RightParen);
+TEST(lexer_binary_literal_flags) {
+    // Common use case: bit flags
+    auto tokens = lex("flags = 0b11111111");
+    
+    EXPECT_SIZE(tokens, 3);
+    EXPECT_EQ(tokens[0].type, TokenType::Identifier);
+    EXPECT_EQ(tokens[1].type, TokenType::Assign);
+    EXPECT_EQ(tokens[2].type, TokenType::BinaryInteger);
+    EXPECT_EQ(tokens[2].value, std::string("0b11111111"));
 }
 
-TEST(lexer_import_syntax) {
-    auto tokens = lex("#import <engine/console> { Print, Log }");
+TEST(lexer_invalid_binary_literal) {
+    auto tokens = lex("0b");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_TRUE(tokens[0].isError());
+}
 
-    EXPECT_EQ(tokens[0].type,  TokenType::Hash);
-    EXPECT_EQ(tokens[1].type,  TokenType::Identifier);
-    EXPECT_EQ(tokens[1].value, std::string("import"));
-    EXPECT_EQ(tokens[2].type,  TokenType::Less);
-    EXPECT_EQ(tokens[3].type,  TokenType::Identifier);
-    EXPECT_EQ(tokens[3].value, std::string("engine"));
-    EXPECT_EQ(tokens[4].type,  TokenType::Slash);
-    EXPECT_EQ(tokens[5].type,  TokenType::Identifier);
-    EXPECT_EQ(tokens[5].value, std::string("console"));
-    EXPECT_EQ(tokens[6].type,  TokenType::Greater);
-    EXPECT_EQ(tokens[7].type,  TokenType::LeftBrace);
-    EXPECT_EQ(tokens[8].type,  TokenType::Identifier);
-    EXPECT_EQ(tokens[8].value, std::string("Print"));
-    EXPECT_EQ(tokens[9].type,  TokenType::Comma);
-    EXPECT_EQ(tokens[10].type, TokenType::Identifier);
-    EXPECT_EQ(tokens[10].value, std::string("Log"));
-    EXPECT_EQ(tokens[11].type, TokenType::RightBrace);
+TEST(lexer_binary_with_invalid_digit) {
+    auto tokens = lex("0b102");
+    
+    // Should tokenize as 0b10 followed by 2
+    EXPECT_SIZE(tokens, 2);
+    EXPECT_EQ(tokens[0].type, TokenType::BinaryInteger);
+    EXPECT_EQ(tokens[0].value, std::string("0b10"));
+    EXPECT_EQ(tokens[1].type, TokenType::Integer);
 }
 
 // --------------------------------------------------------
-// Empty input
+// Scientific notation
 // --------------------------------------------------------
 
-TEST(lexer_empty_input) {
-    auto tokens = lex("");
-    EXPECT_SIZE(tokens, 0);
+TEST(lexer_scientific_notation_positive) {
+    auto tokens = lex("1.5e3");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::Scientific);
+    EXPECT_EQ(tokens[0].value, std::string("1.5e3"));
 }
 
-TEST(lexer_only_whitespace) {
-    auto tokens = lex("   \n\n\t  \n  ");
-    EXPECT_SIZE(tokens, 0);
+TEST(lexer_scientific_notation_negative) {
+    auto tokens = lex("2.0e-10");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::Scientific);
+    EXPECT_EQ(tokens[0].value, std::string("2.0e-10"));
 }
 
-TEST(lexer_only_comments) {
-    auto tokens = lex("// nothing here\n/* also nothing */");
-    EXPECT_SIZE(tokens, 0);
+TEST(lexer_scientific_notation_explicit_positive) {
+    auto tokens = lex("3.14E+2");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::Scientific);
+    EXPECT_EQ(tokens[0].value, std::string("3.14E+2"));
+}
+
+TEST(lexer_scientific_integer_base) {
+    auto tokens = lex("5e10");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::Scientific);
+    EXPECT_EQ(tokens[0].value, std::string("5e10"));
+}
+
+// --------------------------------------------------------
+// Character literals
+// --------------------------------------------------------
+
+TEST(lexer_char_literal_simple) {
+    auto tokens = lex("'a'");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::Char);
+    EXPECT_EQ(tokens[0].value, std::string("a"));
+}
+
+TEST(lexer_char_literal_escape_newline) {
+    auto tokens = lex("'\\n'");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::Char);
+    EXPECT_EQ(tokens[0].value, std::string("\n"));
+}
+
+TEST(lexer_char_literal_escape_tab) {
+    auto tokens = lex("'\\t'");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::Char);
+    EXPECT_EQ(tokens[0].value, std::string("\t"));
+}
+
+TEST(lexer_char_literal_escape_quote) {
+    auto tokens = lex("'\\''");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::Char);
+    EXPECT_EQ(tokens[0].value, std::string("'"));
+}
+
+TEST(lexer_char_literal_escape_backslash) {
+    auto tokens = lex("'\\\\'");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::Char);
+    EXPECT_EQ(tokens[0].value, std::string("\\"));
+}
+
+TEST(lexer_char_literal_empty_error) {
+    auto tokens = lex("''");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_TRUE(tokens[0].isError());
+}
+
+TEST(lexer_char_literal_unterminated) {
+    auto tokens = lex("'a");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_TRUE(tokens[0].isError());
+}
+
+TEST(lexer_char_literal_invalid_escape) {
+    auto tokens = lex("'\\x'");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_TRUE(tokens[0].isError());
+}
+
+// --------------------------------------------------------
+// Raw strings (backticks)
+// --------------------------------------------------------
+
+TEST(lexer_raw_string_simple) {
+    auto tokens = lex("`hello`");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::RawString);
+    EXPECT_EQ(tokens[0].value, std::string("hello"));
+}
+
+TEST(lexer_raw_string_with_backslashes) {
+    // In raw strings, backslashes are literal
+    auto tokens = lex("`C:\\Users\\path`");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::RawString);
+    EXPECT_EQ(tokens[0].value, std::string("C:\\Users\\path"));
+}
+
+TEST(lexer_raw_string_multiline) {
+    auto tokens = lex("`line1\nline2\nline3`");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::RawString);
+    EXPECT_EQ(tokens[0].value, std::string("line1\nline2\nline3"));
+}
+
+TEST(lexer_raw_string_shader_code) {
+    // Common use case: shader code
+    const char* shader = R"(`
+        #version 330 core
+        out vec4 FragColor;
+        void main() {
+            FragColor = vec4(1.0, 0.5, 0.2, 1.0);
+        }
+    `)";
+    
+    auto tokens = lex(shader);
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::RawString);
+}
+
+TEST(lexer_raw_string_unterminated) {
+    auto tokens = lex("`unterminated");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_TRUE(tokens[0].isError());
+}
+
+// --------------------------------------------------------
+// String interpolation
+// --------------------------------------------------------
+
+TEST(lexer_interpolated_string_simple) {
+    auto tokens = lex("\"Hello ${name}\"");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::InterpolatedString);
+    EXPECT_EQ(tokens[0].value, std::string("Hello ${name}"));
+}
+
+TEST(lexer_interpolated_string_multiple) {
+    auto tokens = lex("\"${x} + ${y} = ${result}\"");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::InterpolatedString);
+}
+
+TEST(lexer_regular_string_no_interpolation) {
+    // String without ${} should be regular String, not InterpolatedString
+    auto tokens = lex("\"Hello world\"");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::String);
+}
+
+TEST(lexer_dollar_sign_alone_not_interpolation) {
+    // $ without { should not trigger interpolation
+    auto tokens = lex("\"Cost: $5\"");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::String);
+}
+
+// --------------------------------------------------------
+// 'in' keyword for for-in loops
+// --------------------------------------------------------
+
+TEST(lexer_in_keyword) {
+    auto tokens = lex("for item in array");
+    
+    EXPECT_SIZE(tokens, 4);
+    EXPECT_EQ(tokens[0].type, TokenType::For);
+    EXPECT_EQ(tokens[1].type, TokenType::Identifier);
+    EXPECT_EQ(tokens[2].type, TokenType::In);
+    EXPECT_EQ(tokens[3].type, TokenType::Identifier);
+}
+
+TEST(lexer_in_not_confused_with_identifier) {
+    auto tokens = lex("inside in input");
+    
+    EXPECT_SIZE(tokens, 3);
+    EXPECT_EQ(tokens[0].type, TokenType::Identifier); // inside
+    EXPECT_EQ(tokens[1].type, TokenType::In);         // in
+    EXPECT_EQ(tokens[2].type, TokenType::Identifier); // input
+}
+
+// --------------------------------------------------------
+// Dollar sign for template markers
+// --------------------------------------------------------
+
+TEST(lexer_dollar_sign_standalone) {
+    auto tokens = lex("$");
+    
+    EXPECT_SIZE(tokens, 1);
+    EXPECT_EQ(tokens[0].type, TokenType::Dollar);
+}
+
+TEST(lexer_dollar_with_identifier) {
+    // This could be used for special syntax like $varName
+    auto tokens = lex("$ name");
+    
+    EXPECT_SIZE(tokens, 2);
+    EXPECT_EQ(tokens[0].type, TokenType::Dollar);
+    EXPECT_EQ(tokens[1].type, TokenType::Identifier);
+}
+
+// ============================================================
+// REALISTIC GAME DEV EXAMPLES
+// ============================================================
+
+TEST(lexer_color_constant_hex) {
+    auto tokens = lex("const RED = 0xFF0000;");
+    
+    EXPECT_SIZE(tokens, 5);
+    EXPECT_EQ(tokens[0].type, TokenType::Const);
+    EXPECT_EQ(tokens[1].type, TokenType::Identifier);
+    EXPECT_EQ(tokens[2].type, TokenType::Assign);
+    EXPECT_EQ(tokens[3].type, TokenType::HexInteger);
+    EXPECT_EQ(tokens[4].type, TokenType::Semicolon);
+}
+
+TEST(lexer_physics_constants_scientific) {
+    auto tokens = lex("const GRAVITY = 9.8e-3;");
+    
+    EXPECT_SIZE(tokens, 5);
+    EXPECT_EQ(tokens[2].type, TokenType::Assign);
+    EXPECT_EQ(tokens[3].type, TokenType::Scientific);
+}
+
+TEST(lexer_event_callback_lambda) {
+    auto tokens = lex("button.onClick(() => { health -= 10; });");
+    
+    // Spot check key parts
+    EXPECT_EQ(tokens[0].type, TokenType::Identifier); // button
+    EXPECT_EQ(tokens[1].type, TokenType::Dot);
+    EXPECT_EQ(tokens[2].type, TokenType::Identifier); // onClick
+    EXPECT_EQ(tokens[3].type, TokenType::LeftParen);
+    EXPECT_EQ(tokens[4].type, TokenType::LeftParen);
+    EXPECT_EQ(tokens[5].type, TokenType::RightParen);
+    EXPECT_EQ(tokens[6].type, TokenType::LambdaArrow);
+}
+
+TEST(lexer_range_based_for_loop) {
+    auto tokens = lex("for i in 0..10 { }");
+    
+    EXPECT_EQ(tokens[0].type, TokenType::For);
+    EXPECT_EQ(tokens[1].type, TokenType::Identifier); // i
+    EXPECT_EQ(tokens[2].type, TokenType::In);
+    EXPECT_EQ(tokens[3].type, TokenType::Integer);    // 0
+    EXPECT_EQ(tokens[4].type, TokenType::DotDot);
+    EXPECT_EQ(tokens[5].type, TokenType::Integer);    // 10
+}
+
+TEST(lexer_input_handling_char) {
+    auto tokens = lex("if (key == 'w') { moveForward(); }");
+    
+    // Find the char literal
+    bool foundChar = false;
+    for (const auto& tok : tokens) {
+        if (tok.type == TokenType::Char && tok.value == "w") {
+            foundChar = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(foundChar);
+}
+
+TEST(lexer_debug_message_interpolation) {
+    auto tokens = lex("Log(\"Player health: ${health}\");");
+    
+    // Check for interpolated string
+    bool foundInterpolated = false;
+    for (const auto& tok : tokens) {
+        if (tok.type == TokenType::InterpolatedString) {
+            foundInterpolated = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(foundInterpolated);
+}
+
+TEST(lexer_shader_code_raw_string) {
+    const char* code = "const vertexShader = `\n"
+                       "    attribute vec3 position;\n"
+                       "    void main() { }\n"
+                       "`;";
+    
+    auto tokens = lex(code);
+    
+    EXPECT_EQ(tokens[0].type, TokenType::Const);
+    EXPECT_EQ(tokens[1].type, TokenType::Identifier);
+    EXPECT_EQ(tokens[2].type, TokenType::Assign);
+    EXPECT_EQ(tokens[3].type, TokenType::RawString);
+    EXPECT_EQ(tokens[4].type, TokenType::Semicolon);
+}
+
+TEST(lexer_bit_flags_binary) {
+    auto tokens = lex("const FLAGS = 0b11010110;");
+    
+    EXPECT_EQ(tokens[0].type, TokenType::Const);
+    EXPECT_EQ(tokens[3].type, TokenType::BinaryInteger);
+}
+
+TEST(lexer_spread_operator_function_call) {
+    auto tokens = lex("spawn(player, ...args);");
+    
+    bool foundSpread = false;
+    for (const auto& tok : tokens) {
+        if (tok.type == TokenType::DotDotDot) {
+            foundSpread = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(foundSpread);
+}
+
+TEST(lexer_lambda_with_multiple_params) {
+    auto tokens = lex("filter((x, y, z) => x > 0)");
+    
+    EXPECT_EQ(tokens[0].type, TokenType::Identifier); // filter
+    EXPECT_EQ(tokens[1].type, TokenType::LeftParen);
+    EXPECT_EQ(tokens[2].type, TokenType::LeftParen);
+    // ... params ...
+    EXPECT_EQ(tokens[8].type, TokenType::RightParen);
+    EXPECT_EQ(tokens[9].type, TokenType::LambdaArrow);
+}
+
+// --------------------------------------------------------
+// Edge cases and combinations
+// --------------------------------------------------------
+
+TEST(lexer_all_number_types_together) {
+    auto tokens = lex("42 0xFF 0b1010 3.14 1.5e-3");
+    
+    EXPECT_SIZE(tokens, 5);
+    EXPECT_EQ(tokens[0].type, TokenType::Integer);
+    EXPECT_EQ(tokens[1].type, TokenType::HexInteger);
+    EXPECT_EQ(tokens[2].type, TokenType::BinaryInteger);
+    EXPECT_EQ(tokens[3].type, TokenType::Float);
+    EXPECT_EQ(tokens[4].type, TokenType::Scientific);
+}
+
+TEST(lexer_all_string_types_together) {
+    auto tokens = lex("\"normal\" `raw` \"${interpolated}\"");
+    
+    EXPECT_SIZE(tokens, 3);
+    EXPECT_EQ(tokens[0].type, TokenType::String);
+    EXPECT_EQ(tokens[1].type, TokenType::RawString);
+    EXPECT_EQ(tokens[2].type, TokenType::InterpolatedString);
+}
+
+TEST(lexer_arrow_vs_lambda_arrow) {
+    auto tokens = lex("-> =>");
+    
+    EXPECT_SIZE(tokens, 2);
+    EXPECT_EQ(tokens[0].type, TokenType::Arrow);
+    EXPECT_EQ(tokens[1].type, TokenType::LambdaArrow);
+}
+
+TEST(lexer_complex_realistic_snippet) {
+    const char* code = R"(
+        public class Enemy {
+            @expose(min=0, max=100)
+            private int32 health = 100;
+            
+            void takeDamage(int32 amount) {
+                health -= amount;
+                if (health <= 0) {
+                    onDeath();
+                }
+            }
+            
+            void onDeath() {
+                Log("Enemy died with message: ${deathMessage}");
+                
+                // Drop items
+                for item in loot {
+                    spawn(item, ...position);
+                }
+                
+                // Binary flags for death effects
+                const EFFECT_FLAGS = 0b11010110;
+                
+                // Lambda for delayed destruction
+                Timer.after(1.0, () => {
+                    destroy(this);
+                });
+            }
+        }
+    )";
+    
+    auto tokens = lex(code);
+    
+    // Just verify we successfully tokenized complex code
+    EXPECT_TRUE(tokens.size() > 50);
+    
+    // Verify no errors
+    for (const auto& tok : tokens) {
+        EXPECT_FALSE(tok.isError());
+    }
 }

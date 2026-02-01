@@ -9,6 +9,14 @@
 // token.h — Token types and the Token struct.
 // This is what the lexer emits. Everything downstream (parser,
 // semantic analysis) consumes this.
+// 
+// UPDATED: Added game-dev friendly features:
+// - Lambda arrow (=>)
+// - Range operators (.., ...)
+// - String interpolation ($)
+// - Raw strings (backtick)
+// - Collection literals
+// - Hex/binary number literals
 // ------------------------------------------------------------
 
 namespace scriptlang {
@@ -17,8 +25,14 @@ namespace scriptlang {
 enum class TokenType {
     // --------------- Literals ---------------
     Integer,        // 42, 0, -7
+    HexInteger,     // 0xFF, 0x1A2B
+    BinaryInteger,  // 0b1010, 0b11111111
     Float,          // 3.14, 0.0, -1.5
+    Scientific,     // 1.5e-3, 2.0E+10
     String,         // "hello world"
+    RawString,      // `raw string with ${no interpolation}`
+    InterpolatedString, // "Hello ${name}" (will need special handling in parser)
+    Char,           // 'a', '\n'
     True,           // true
     False,          // false
     Null,           // null
@@ -48,9 +62,10 @@ enum class TokenType {
     New,            // new
     Void,           // void
     Auto,           // auto
-    Case,
-    Default,
-    Include,
+    Case,           // case
+    Default,        // default
+    Include,        // include (or import - pick one!)
+    In,             // in (for "for x in array" loops)
 
     // Type keywords
     Int8,           // int8
@@ -72,7 +87,7 @@ enum class TokenType {
     Star,           // *
     Slash,          // /
     Percent,        // %
-    Question,	    // ?
+    Question,       // ?
     QuestionQuestion, // ??
     DotQuestion,    // .?
 
@@ -104,14 +119,19 @@ enum class TokenType {
     Semicolon,      // ;
     Comma,          // ,
     Dot,            // .
+    DotDot,         // .. (range operator: 0..10)
+    DotDotDot,      // ... (spread/rest operator)
     Colon,          // :
-    Arrow,          // ->
+    Arrow,          // -> (function return type)
+    LambdaArrow,    // => (lambda/arrow function)
 
     // --------------- Directives & Annotations ---------------
-    Hash,           // # (start of directive like #import)
+    Hash,           // # (start of directive like #include)
     At,             // @ (start of annotation like @expose)
+    Dollar,         // $ (for string interpolation - marks start of ${...})
 
     // --------------- Special ---------------
+    Backtick,       // ` (for raw strings)
     Eof,            // end of file
     Error,          // lexer error — carries the error message in `value`
 };
@@ -138,8 +158,14 @@ struct Token {
 inline std::string_view tokenTypeName(TokenType type) {
     switch (type) {
         case TokenType::Integer:        return "Integer";
+        case TokenType::HexInteger:     return "HexInteger";
+        case TokenType::BinaryInteger:  return "BinaryInteger";
         case TokenType::Float:          return "Float";
+        case TokenType::Scientific:     return "Scientific";
         case TokenType::String:         return "String";
+        case TokenType::RawString:      return "RawString";
+        case TokenType::InterpolatedString: return "InterpolatedString";
+        case TokenType::Char:           return "Char";
         case TokenType::True:           return "True";
         case TokenType::False:          return "False";
         case TokenType::Null:           return "Null";
@@ -176,7 +202,8 @@ inline std::string_view tokenTypeName(TokenType type) {
         case TokenType::Float64:        return "float64";
         case TokenType::Bool:           return "bool";
         case TokenType::String_:        return "string";
-	case TokenType::Include:         return "include";
+        case TokenType::Include:        return "include";
+        case TokenType::In:             return "in";
         case TokenType::Plus:           return "+";
         case TokenType::Minus:          return "-";
         case TokenType::Star:           return "*";
@@ -195,11 +222,11 @@ inline std::string_view tokenTypeName(TokenType type) {
         case TokenType::GreaterEqual:   return ">=";
         case TokenType::And:            return "&&";
         case TokenType::Or:             return "||";
-	case TokenType::Question:	return "?";
-	case TokenType::QuestionQuestion: return "??";
-	case TokenType::Default:	return "default";
-	case TokenType::Case:		return "case";
-	case TokenType::DotQuestion:	return ".?";
+        case TokenType::Question:       return "?";
+        case TokenType::QuestionQuestion: return "??";
+        case TokenType::Default:        return "default";
+        case TokenType::Case:           return "case";
+        case TokenType::DotQuestion:    return ".?";
         case TokenType::Not:            return "!";
         case TokenType::LeftParen:      return "(";
         case TokenType::RightParen:     return ")";
@@ -210,13 +237,18 @@ inline std::string_view tokenTypeName(TokenType type) {
         case TokenType::Semicolon:      return ";";
         case TokenType::Comma:          return ",";
         case TokenType::Dot:            return ".";
+        case TokenType::DotDot:         return "..";
+        case TokenType::DotDotDot:      return "...";
         case TokenType::Colon:          return ":";
         case TokenType::Arrow:          return "->";
+        case TokenType::LambdaArrow:    return "=>";
         case TokenType::Hash:           return "#";
         case TokenType::At:             return "@";
+        case TokenType::Dollar:         return "$";
+        case TokenType::Backtick:       return "`";
         case TokenType::Eof:            return "<EOF>";
         case TokenType::Error:          return "<Error>";
-	case TokenType::Switch:		return "switch:";
+        case TokenType::Switch:         return "switch";
     }
     return "<Unknown>";
 }

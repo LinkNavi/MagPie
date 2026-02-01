@@ -7,9 +7,20 @@
 #include <string_view>
 #include <vector>
 #include <unordered_map>
+#include <cctype>
 
 // ------------------------------------------------------------
 // lexer.h — Tokenizes source code into a stream of Tokens.
+//
+// UPDATED: Enhanced with game-dev friendly features:
+// - Hex/binary integer literals (0xFF, 0b1010)
+// - Scientific notation (1.5e-3)
+// - Character literals ('a', '\n')
+// - Raw strings with backticks (`raw text`)
+// - String interpolation markers ($)
+// - Lambda arrow (=>)
+// - Range operators (.., ...)
+// - 'in' keyword for for-in loops
 //
 // Usage:
 //     scriptlang::Lexer lexer(sourceCode);
@@ -150,6 +161,7 @@ private:
             case '#': advance(); return Token(TokenType::Hash,         "#", startLine, startColumn);
             case '@': advance(); return Token(TokenType::At,           "@", startLine, startColumn);
             case '%': advance(); return Token(TokenType::Percent,      "%", startLine, startColumn);
+            case '$': advance(); return Token(TokenType::Dollar,       "$", startLine, startColumn);
 
             case '+':
                 advance();
@@ -169,16 +181,22 @@ private:
             case '=':
                 advance();
                 if (match('=')) return Token(TokenType::Equal,  "==", startLine, startColumn);
+                if (match('>')) return Token(TokenType::LambdaArrow, "=>", startLine, startColumn);
                 return Token(TokenType::Assign, "=", startLine, startColumn);
-	    case '?':
-		advance();
-		if (match('?')) return Token(TokenType::QuestionQuestion, "??", startLine, startColumn);
-		return Token(TokenType::Question, "?", startLine, startColumn);
-	
-	    case '.':
-		advance();
-		if (match('?')) return Token(TokenType::DotQuestion, ".?", startLine, startColumn);
-		return Token(TokenType::Dot, ".", startLine, startColumn);
+
+            case '?':
+                advance();
+                if (match('?')) return Token(TokenType::QuestionQuestion, "??", startLine, startColumn);
+                return Token(TokenType::Question, "?", startLine, startColumn);
+
+            case '.':
+                advance();
+                if (match('?')) return Token(TokenType::DotQuestion, ".?", startLine, startColumn);
+                if (match('.')) {
+                    if (match('.')) return Token(TokenType::DotDotDot, "...", startLine, startColumn);
+                    return Token(TokenType::DotDot, "..", startLine, startColumn);
+                }
+                return Token(TokenType::Dot, ".", startLine, startColumn);
 
             case '!':
                 advance();
@@ -212,12 +230,33 @@ private:
                 return Token(TokenType::Minus, "-", startLine, startColumn);
         }
 
-        // --- String literal ---
+        // --- Character literal ---
+        if (c == '\'') {
+            return scanChar(startLine, startColumn);
+        }
+
+        // --- String literal (regular or interpolated) ---
         if (c == '"') {
             return scanString(startLine, startColumn);
         }
 
-        // --- Number literal ---
+        // --- Raw string literal (backtick) ---
+        if (c == '`') {
+            return scanRawString(startLine, startColumn);
+        }
+
+        // --- Number literal (check for hex/binary FIRST, then regular numbers) ---
+        // Special case: hex literal starting with 0x
+        if (c == '0' && (peek(1) == 'x' || peek(1) == 'X')) {
+            return scanHexNumber(startLine, startColumn);
+        }
+
+        // Special case: binary literal starting with 0b
+        if (c == '0' && (peek(1) == 'b' || peek(1) == 'B')) {
+            return scanBinaryNumber(startLine, startColumn);
+        }
+
+        // Regular number literal (integers, floats, scientific)
         if (isDigit(c)) {
             return scanNumber(startLine, startColumn);
         }
@@ -235,13 +274,63 @@ private:
     }
 
     // --------------------------------------------------------
+    // Character literal scanning
+    // Handles: 'a', '\n', '\t', '\\', '\''
+    // --------------------------------------------------------
+    Token scanChar(int startLine, int startColumn) {
+        advance(); // consume opening '
+
+        if (isAtEnd()) {
+            return Token(TokenType::Error, "Unterminated character literal", startLine, startColumn);
+        }
+
+        char value;
+        if (current() == '\\') {
+            advance(); // consume backslash
+            if (isAtEnd()) {
+                return Token(TokenType::Error, "Unterminated character literal", startLine, startColumn);
+            }
+            switch (current()) {
+                case 'n':  value = '\n'; break;
+                case 't':  value = '\t'; break;
+                case 'r':  value = '\r'; break;
+                case '\\': value = '\\'; break;
+                case '\'': value = '\''; break;
+                case '0':  value = '\0'; break;
+                default:
+                    return Token(TokenType::Error,
+                        std::string("Invalid escape sequence '\\") + current() + "' in character literal",
+                        startLine, startColumn);
+            }
+            advance();
+        } else if (current() == '\'') {
+            return Token(TokenType::Error, "Empty character literal", startLine, startColumn);
+        } else if (current() == '\n') {
+            return Token(TokenType::Error, "Unterminated character literal", startLine, startColumn);
+        } else {
+            value = current();
+            advance();
+        }
+
+        if (isAtEnd() || current() != '\'') {
+            return Token(TokenType::Error, "Unterminated character literal", startLine, startColumn);
+        }
+
+        advance(); // consume closing '
+        return Token(TokenType::Char, std::string(1, value), startLine, startColumn);
+    }
+
+    // --------------------------------------------------------
     // String literal scanning
     // Handles escape sequences: \n \t \\ \"
+    // Detects ${...} for interpolation marking
     // --------------------------------------------------------
     Token scanString(int startLine, int startColumn) {
         advance(); // consume opening "
 
         std::string value;
+        bool hasInterpolation = false;
+
         while (!isAtEnd() && current() != '"') {
             if (current() == '\n') {
                 return Token(TokenType::Error, "Unterminated string literal", startLine, startColumn);
@@ -254,6 +343,7 @@ private:
                 switch (current()) {
                     case 'n':  value += '\n'; break;
                     case 't':  value += '\t'; break;
+                    case 'r':  value += '\r'; break;
                     case '\\': value += '\\'; break;
                     case '"':  value += '"';  break;
                     default:
@@ -261,6 +351,11 @@ private:
                             std::string("Invalid escape sequence '\\") + current() + "'",
                             startLine, startColumn);
                 }
+                advance();
+            } else if (current() == '$' && peek(1) == '{') {
+                // Mark that this string has interpolation
+                hasInterpolation = true;
+                value += current();
                 advance();
             } else {
                 value += current();
@@ -273,24 +368,92 @@ private:
         }
 
         advance(); // consume closing "
-        return Token(TokenType::String, value, startLine, startColumn);
+        
+        TokenType type = hasInterpolation ? TokenType::InterpolatedString : TokenType::String;
+        return Token(type, value, startLine, startColumn);
+    }
+
+    // --------------------------------------------------------
+    // Raw string literal scanning (backticks)
+    // No escape sequences, everything is literal
+    // --------------------------------------------------------
+    Token scanRawString(int startLine, int startColumn) {
+        advance(); // consume opening `
+
+        std::string value;
+        while (!isAtEnd() && current() != '`') {
+            value += current();
+            advance();
+        }
+
+        if (isAtEnd()) {
+            return Token(TokenType::Error, "Unterminated raw string literal", startLine, startColumn);
+        }
+
+        advance(); // consume closing `
+        return Token(TokenType::RawString, value, startLine, startColumn);
+    }
+
+    // --------------------------------------------------------
+    // Hexadecimal number scanning (0xFF, 0x1A2B)
+    // --------------------------------------------------------
+    Token scanHexNumber(int startLine, int startColumn) {
+        std::string value;
+        value += current(); // 0
+        advance();
+        value += current(); // x or X
+        advance();
+
+        if (isAtEnd() || !isHexDigit(current())) {
+            return Token(TokenType::Error, "Invalid hexadecimal literal", startLine, startColumn);
+        }
+
+        while (!isAtEnd() && isHexDigit(current())) {
+            value += current();
+            advance();
+        }
+
+        return Token(TokenType::HexInteger, value, startLine, startColumn);
+    }
+
+    // --------------------------------------------------------
+    // Binary number scanning (0b1010, 0b11111111)
+    // --------------------------------------------------------
+    Token scanBinaryNumber(int startLine, int startColumn) {
+        std::string value;
+        value += current(); // 0
+        advance();
+        value += current(); // b or B
+        advance();
+
+        if (isAtEnd() || !isBinaryDigit(current())) {
+            return Token(TokenType::Error, "Invalid binary literal", startLine, startColumn);
+        }
+
+        while (!isAtEnd() && isBinaryDigit(current())) {
+            value += current();
+            advance();
+        }
+
+        return Token(TokenType::BinaryInteger, value, startLine, startColumn);
     }
 
     // --------------------------------------------------------
     // Number literal scanning
-    // Supports integers and floats (with a single decimal point).
+    // Supports integers, floats, and scientific notation
     // --------------------------------------------------------
     Token scanNumber(int startLine, int startColumn) {
         std::string value;
         bool isFloat = false;
+        bool isScientific = false;
 
+        // Integer part
         while (!isAtEnd() && isDigit(current())) {
             value += current();
             advance();
         }
 
-        // Check for decimal point followed by a digit (to avoid
-        // consuming the dot in cases like "obj.method")
+        // Decimal part
         if (!isAtEnd() && current() == '.' && isDigit(peek(1))) {
             isFloat = true;
             value += current();
@@ -302,7 +465,51 @@ private:
             }
         }
 
-        TokenType type = isFloat ? TokenType::Float : TokenType::Integer;
+        // Scientific notation (e or E)
+        if (!isAtEnd() && (current() == 'e' || current() == 'E')) {
+            char savedChar = current();
+            size_t savedPos = pos_;
+            int savedLine = line_;
+            int savedCol = column_;
+            
+            advance(); // consume e/E
+            
+            // Optional + or -
+            if (!isAtEnd() && (current() == '+' || current() == '-')) {
+                char sign = current();
+                advance();
+                
+                if (isAtEnd() || !isDigit(current())) {
+                    // Not a valid exponent, backtrack
+                    pos_ = savedPos;
+                    line_ = savedLine;
+                    column_ = savedCol;
+                } else {
+                    isScientific = true;
+                    value += savedChar;
+                    value += sign;
+                    while (!isAtEnd() && isDigit(current())) {
+                        value += current();
+                        advance();
+                    }
+                }
+            } else if (!isAtEnd() && isDigit(current())) {
+                isScientific = true;
+                value += savedChar;
+                while (!isAtEnd() && isDigit(current())) {
+                    value += current();
+                    advance();
+                }
+            } else {
+                // Not a valid exponent, backtrack
+                pos_ = savedPos;
+                line_ = savedLine;
+                column_ = savedCol;
+            }
+        }
+
+        TokenType type = isScientific ? TokenType::Scientific : 
+                        (isFloat ? TokenType::Float : TokenType::Integer);
         return Token(type, value, startLine, startColumn);
     }
 
@@ -339,7 +546,7 @@ private:
             { "else",     TokenType::Else },
             { "while",    TokenType::While },
             { "for",      TokenType::For },
-	    { "switch",   TokenType::Switch },
+            { "switch",   TokenType::Switch },
             { "break",    TokenType::Break },
             { "continue", TokenType::Continue },
             { "this",     TokenType::This },
@@ -350,9 +557,10 @@ private:
             { "true",     TokenType::True },
             { "false",    TokenType::False },
             { "null",     TokenType::Null },
-	    { "case",	  TokenType::Case},
-	    { "default",  TokenType::Default},
-	    { "include",  TokenType::Include},
+            { "case",     TokenType::Case},
+            { "default",  TokenType::Default},
+            { "include",  TokenType::Include},
+            { "in",       TokenType::In},
             // Type keywords
             { "int8",     TokenType::Int8 },
             { "int16",    TokenType::Int16 },
@@ -380,6 +588,16 @@ private:
     // --------------------------------------------------------
     static bool isDigit(char c) {
         return c >= '0' && c <= '9';
+    }
+
+    static bool isHexDigit(char c) {
+        return (c >= '0' && c <= '9') ||
+               (c >= 'a' && c <= 'f') ||
+               (c >= 'A' && c <= 'F');
+    }
+
+    static bool isBinaryDigit(char c) {
+        return c == '0' || c == '1';
     }
 
     static bool isAlpha(char c) {
