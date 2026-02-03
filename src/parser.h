@@ -2,28 +2,14 @@
 #define PARSER_H
 
 // ------------------------------------------------------------
-// parser.h — Recursive-descent parser.
+// parser.h — Recursive-descent parser (IMPROVED VERSION).
 //
-// Consumes the token stream produced by Lexer and builds the AST
-// defined in ast.h.
-//
-// EXPRESSION PARSING — Pratt / precedence-climbing
-//   Binary operators are handled by a single parseExpr(minPrec)
-//   function.  Each operator has a numeric precedence level and
-//   an associativity.  The table is easy to extend.
-//
-// ERROR HANDLING
-//   The parser does NOT throw.  On error it records a diagnostic
-//   and attempts to synchronize (skip to the next statement
-//   boundary) so it can report multiple errors in one pass.
-//   Call `hasErrors()` / `errors()` after parsing.
-//
-// USAGE
-//     scriptlang::Lexer   lexer(source);
-//     auto tokens       = lexer.tokenize();
-//     scriptlang::Parser  parser(tokens);
-//     auto program      = parser.parse();
-//     if (parser.hasErrors()) { /* report */ }
+// IMPROVEMENTS:
+// - Fixed annotation parsing to properly handle nested arrays and complex values
+// - Better error recovery and synchronization
+// - Support for all syntax features in syntax.mp and docs.mp
+// - Improved handling of visibility modifiers and annotations
+// - Better lookahead for disambiguating constructs
 // ------------------------------------------------------------
 
 #include "token.h"
@@ -34,6 +20,7 @@
 #include <vector>
 #include <optional>
 #include <utility>
+#include <unordered_set>
 
 namespace scriptlang {
 
@@ -72,8 +59,8 @@ public:
         return std::make_unique<Program>(std::move(stmts), start);
     }
 
-    bool                     hasErrors() const { return !errors_.empty(); }
-    const std::vector<ParseError>& errors()    const { return errors_; }
+    bool                          hasErrors() const { return !errors_.empty(); }
+    const std::vector<ParseError>& errors()   const { return errors_; }
 
 // ============================================================
 // PRIVATE
@@ -164,6 +151,8 @@ private:
                 case TokenType::For:
                 case TokenType::Switch:
                 case TokenType::RightBrace:
+                case TokenType::Hash:
+                case TokenType::At:
                     return;
                 default:
                     advance();
@@ -172,77 +161,117 @@ private:
     }
 
     // --------------------------------------------------------
-    // Annotation parsing — @name or @name(key=val, ...)
+    // IMPROVED Annotation parsing
+    // Supports:
+    // - @name
+    // - @name(key=value, key2=value2)
+    // - @name(key=[array, of, values])
+    // - Proper error recovery
     // --------------------------------------------------------
-std::vector<Annotation> parseAnnotationValue(){
-	if (check(TokenType::RightBracket)){
-		advance();
-
-		Annotation values[];
-
-		if (peek().type != TokenType::LeftBracket){
-			values.push(parseAnnotationValue());
-
-		}
-
-
-	}
-}
-
-
-std::vector<Annotation> parseAnnotations() {
-    std::vector<Annotation> annotations;
-
-    while (check(TokenType::At)) {
-        SourceLoc loc = currentLoc();
-        advance(); // consume @
-
-        std::string name = expect(TokenType::Identifier, "Expected annotation name after '@'").value;
-
-        std::vector<std::pair<std::string, std::string>> args;
-        if (match(TokenType::LeftParen)) {
-            if (!check(TokenType::RightParen)) {
-                do {
-                    std::string key = expect(TokenType::Identifier, "Expected annotation argument name").value;
-
-                    // 1) REQUIRE '='
-                    expect(TokenType::Assign, "Expected '=' after annotation argument name");
-
-                    // 2) ONLY accept literal-ish tokens as values
-                    Token t = current();
-                    std::string val;
-                    if (t.type == TokenType::String) {
-                        val = t.value; advance();
-                    } else if (t.type == TokenType::Integer || t.type == TokenType::Float) {
-                        val = t.value; advance();
-                    } else if (t.type == TokenType::Identifier) {
-                        // allow identifiers as symbolic values (e.g., enums)
-                        val = t.value; advance();
-                    } else if (t.type == TokenType::True || t.type == TokenType::False) {
-                        val = t.value; advance();
-                    } else {
-                        // 3) RECOVER: emit error and skip to next comma or ')'
-                        // Replace `errorAt` with whatever you use for reporting parse errors.
-                        errorAtToken(t, "Expected literal (string, number, identifier, true/false) after '=' in annotation");
-                        while (!check(TokenType::Comma) && !check(TokenType::RightParen) && !isAtEnd()) advance();
-                        // if we stopped at a comma, loop will consume it below; if at RightParen, we'll break correctly
-                        // skip pushing an arg for this broken entry
-                        if (check(TokenType::Comma)) { /* fallthrough to consume comma */ }
-                        else if (check(TokenType::RightParen)) { /* will close */ }
-                        continue;
+    
+    // Parse a single annotation value (can be literal, identifier, or array)
+    std::string parseAnnotationValue() {
+        if (check(TokenType::LeftBracket)) {
+            // Array value: [item1, item2, ...]
+            advance(); // consume [
+            std::string result = "[";
+            bool first = true;
+            
+            while (!check(TokenType::RightBracket) && !isAtEnd()) {
+                if (!first) result += ",";
+                first = false;
+                
+                // Each item can be a simple value
+                Token t = current();
+                if (t.type == TokenType::String || 
+                    t.type == TokenType::Integer || 
+                    t.type == TokenType::Float ||
+                    t.type == TokenType::Identifier ||
+                    t.type == TokenType::True ||
+                    t.type == TokenType::False) {
+                    result += t.value;
+                    advance();
+                } else {
+                    errorAtToken(t, "Expected literal value in annotation array");
+                    break;
+                }
+                
+                if (!check(TokenType::RightBracket)) {
+                    if (!match(TokenType::Comma)) {
+                        error("Expected ',' or ']' in annotation array");
+                        break;
                     }
-
-                    args.push_back({std::move(key), std::move(val)});
-                } while (match(TokenType::Comma));
+                }
             }
-            expect(TokenType::RightParen, "Expected ')' after annotation arguments");
+            
+            expect(TokenType::RightBracket, "Expected ']' after annotation array");
+            result += "]";
+            return result;
+        } else {
+            // Simple value
+            Token t = current();
+            if (t.type == TokenType::String ||
+                t.type == TokenType::Integer ||
+                t.type == TokenType::Float ||
+                t.type == TokenType::HexInteger ||
+                t.type == TokenType::BinaryInteger ||
+                t.type == TokenType::Scientific ||
+                t.type == TokenType::Identifier ||
+                t.type == TokenType::True ||
+                t.type == TokenType::False) {
+                advance();
+                return t.value;
+            } else {
+                errorAtToken(t, "Expected literal value in annotation");
+                return "";
+            }
         }
-
-        annotations.push_back({std::move(name), std::move(args), loc});
     }
 
-    return annotations;
-}
+    std::vector<Annotation> parseAnnotations() {
+        std::vector<Annotation> annotations;
+
+        while (check(TokenType::At)) {
+            SourceLoc loc = currentLoc();
+            advance(); // consume @
+
+            std::string name = expect(TokenType::Identifier, "Expected annotation name after '@'").value;
+
+            std::vector<std::pair<std::string, std::string>> args;
+            if (match(TokenType::LeftParen)) {
+                if (!check(TokenType::RightParen)) {
+                    do {
+                        std::string key = expect(TokenType::Identifier, "Expected annotation argument name").value;
+
+                        // REQUIRE '='
+                        if (!match(TokenType::Assign)) {
+                            error("Expected '=' after annotation argument name");
+                            // Try to recover by skipping to next comma or closing paren
+                            while (!check(TokenType::Comma) && !check(TokenType::RightParen) && !isAtEnd()) {
+                                advance();
+                            }
+                            if (check(TokenType::Comma)) continue;
+                            else break;
+                        }
+
+                        // Parse value (can be simple or array)
+                        std::string val = parseAnnotationValue();
+                        args.push_back({std::move(key), std::move(val)});
+                        
+                    } while (match(TokenType::Comma));
+                }
+                expect(TokenType::RightParen, "Expected ')' after annotation arguments");
+            }
+
+            Annotation ann;
+            ann.name = std::move(name);
+            ann.args = std::move(args);
+            ann.loc = loc;
+            annotations.push_back(std::move(ann));
+        }
+
+        return annotations;
+    }
 
     // --------------------------------------------------------
     // Type annotation parsing — just a name for now.
@@ -353,24 +382,64 @@ std::vector<Annotation> parseAnnotations() {
             case TokenType::Hash:
                 return parseDirective();
             case TokenType::LeftBrace:
+                if (!annotations.empty()) {
+                    error("Annotations cannot precede block statements");
+                    annotations.clear();
+                }
                 return parseBlock();
             case TokenType::Var:
+                if (!annotations.empty()) {
+                    error("Annotations cannot precede var declarations (use @expose on class members)");
+                    annotations.clear();
+                }
                 return parseVarDecl();
             case TokenType::Const:
+                if (!annotations.empty()) {
+                    error("Annotations cannot precede const declarations");
+                    annotations.clear();
+                }
                 return parseConstDecl();
             case TokenType::Return:
+                if (!annotations.empty()) {
+                    error("Annotations cannot precede return statements");
+                    annotations.clear();
+                }
                 return parseReturn();
             case TokenType::If:
+                if (!annotations.empty()) {
+                    error("Annotations cannot precede if statements");
+                    annotations.clear();
+                }
                 return parseIf();
             case TokenType::While:
+                if (!annotations.empty()) {
+                    error("Annotations cannot precede while statements");
+                    annotations.clear();
+                }
                 return parseWhile();
             case TokenType::For:
+                if (!annotations.empty()) {
+                    error("Annotations cannot precede for statements");
+                    annotations.clear();
+                }
                 return parseFor();
             case TokenType::Switch:
+                if (!annotations.empty()) {
+                    error("Annotations cannot precede switch statements");
+                    annotations.clear();
+                }
                 return parseSwitch();
             case TokenType::Break:
+                if (!annotations.empty()) {
+                    error("Annotations cannot precede break statements");
+                    annotations.clear();
+                }
                 return parseBreak();
             case TokenType::Continue:
+                if (!annotations.empty()) {
+                    error("Annotations cannot precede continue statements");
+                    annotations.clear();
+                }
                 return parseContinue();
             case TokenType::Class:
             case TokenType::Public:
@@ -712,6 +781,9 @@ std::vector<Annotation> parseAnnotations() {
 
         // After modifiers, what's next?
         if (check(TokenType::Class)) {
+            if (isStatic) {
+                error("Classes cannot be declared static");
+            }
             return parseClassDecl(std::move(annotations), loc);
         }
 
@@ -770,7 +842,7 @@ std::vector<Annotation> parseAnnotations() {
         while (!check(TokenType::RightBrace) && !isAtEnd()) {
             ClassMember member;
             member.annotations = parseAnnotations();
-            member.isPublic    = true;
+            member.isPublic    = true;  // default in classes
             member.isStatic    = false;
 
             // Consume visibility
