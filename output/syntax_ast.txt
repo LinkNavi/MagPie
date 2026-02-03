@@ -1,0 +1,109 @@
+// scriptlang AST dump
+// 6 top-level statement(s)
+
+Program:
+  IncludeDecl: <engine/time>
+  IncludeDecl: <engine/physics>
+  IncludeDecl: <engine/console> { Print, Log }
+  ClassDecl: Player
+    Annotation: @compile(mode=aot)
+    Annotation: @permissions
+    member[0]: [private]
+      FunctionDecl: playerHealth  [private]
+        Annotation: @expose(min=0, max=100, step=1, tooltip=The player's health (0 = dead), group=Stats)
+        returnType:
+          TypeAnnotation: int32
+        Param: =
+        body:
+          Block: (0 stmt(s))
+    member[1]:
+      FunctionDecl: playerName
+        Annotation: @expose(maxLength=32, tooltip=Display name shown above player, group=Identity)
+        returnType:
+          TypeAnnotation: string
+        Param: =
+        body:
+          Block: (0 stmt(s))
+    member[2]: [private]
+      FunctionDecl: onInit  [private]
+        Annotation: @lifecycle(phase=init)
+        returnType:
+          TypeAnnotation: void
+        body:
+          Block: (0 stmt(s))
+    member[3]: [private]
+      FunctionDecl: onLateInit  [private]
+        Annotation: @lifecycle(phase=late_init)
+        returnType:
+          TypeAnnotation: void
+        body:
+          Block: (0 stmt(s))
+    member[4]: [private]
+      FunctionDecl: onUpdate  [private]
+        Annotation: @lifecycle(phase=update)
+        returnType:
+          TypeAnnotation: void
+        body:
+          Block: (1 stmt(s))
+            If:
+              condition:
+                CallExpr: (0 arg(s))
+                  callee:
+                    Identifier: isDead
+              then:
+                Block: (1 stmt(s))
+                  ExprStatement:
+                    CallExpr: (1 arg(s))
+                      callee:
+                        Identifier: Print
+                      arg[0]:
+                        Literal: LiteralKind::String = "man im dead"
+    member[5]: [private]
+      FunctionDecl: onFixedUpdate  [private]
+        Annotation: @lifecycle(phase=fixed_update)
+        returnType:
+          TypeAnnotation: void
+        body:
+          Block: (0 stmt(s))
+    member[6]: [private]
+      FunctionDecl: onDestroy  [private]
+        Annotation: @lifecycle(phase=destroy)
+        returnType:
+          TypeAnnotation: void
+        body:
+          Block: (0 stmt(s))
+    member[7]:
+      FunctionDecl: getHealth
+        returnType:
+          TypeAnnotation: int32
+        body:
+          Block: (1 stmt(s))
+            Return:
+              Identifier: playerHealth
+    member[8]:
+      FunctionDecl: isDead
+        returnType:
+          TypeAnnotation: bool
+        body:
+          Block: (1 stmt(s))
+            Return:
+              BinaryExpr: BinaryOp::LessEqual
+                left:
+                  CallExpr: (0 arg(s))
+                    callee:
+                      Identifier: getHealth
+                right:
+                  Literal: LiteralKind::Integer = "0"
+  IncludeDecl: <engine/console> { Print }
+  FunctionDecl: onUpdate
+    Annotation: @lifecycle(phase=update)
+    returnType:
+      TypeAnnotation: void
+    body:
+      Block: (1 stmt(s))
+        ExprStatement:
+          CallExpr: (1 arg(s))
+            callee:
+              Identifier: Print
+            arg[0]:
+              Literal: LiteralKind::String = "I am a simple script, no class needed."

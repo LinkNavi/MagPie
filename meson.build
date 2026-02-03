@@ -15,11 +15,14 @@ amalgamator = find_program('tools/amalgamate.py')
 
 # List your internal header files here in the order they should be combined.
 # Add new headers to this list as you create them.
+# NOTE: lexer.h MUST come before parser.h — Parser::parseInterpolatedString
+#       instantiates a Lexer internally, so the Lexer class definition must
+#       already be visible in the amalgamated output.
 source_headers = files(
     'src/token.h',
     'src/ast.h',
-    'src/parser.h',
     'src/lexer.h',
+    'src/parser.h',
 )
 
 amalgamated_header = custom_target(
@@ -58,3 +61,18 @@ test_exe = executable(
 )
 
 test('scriptlang tests', test_exe)
+
+# ---------------------------------------------------------------------------
+# Debug dump tool
+# Reads a .sl source file and writes two files next to it:
+#     <name>_tokens.txt   — full token stream, one per line
+#     <name>_ast.txt      — indented AST tree dump
+#
+# Usage after building:
+#     ./build/scriptlang_debug  path/to/script.sl
+# ---------------------------------------------------------------------------
+debug_exe = executable(
+    'scriptlang_debug',
+    sources: ['tools/debug_dump.cpp'],
+    dependencies: [scriptlang_dep],
+)

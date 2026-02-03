@@ -174,37 +174,75 @@ private:
     // --------------------------------------------------------
     // Annotation parsing — @name or @name(key=val, ...)
     // --------------------------------------------------------
-    std::vector<Annotation> parseAnnotations() {
-        std::vector<Annotation> annotations;
+std::vector<Annotation> parseAnnotationValue(){
+	if (check(TokenType::RightBracket)){
+		advance();
 
-        while (check(TokenType::At)) {
-            SourceLoc loc = currentLoc();
-            advance(); // consume @
+		Annotation values[];
 
-            std::string name = expect(TokenType::Identifier, "Expected annotation name after '@'").value;
+		if (peek().type != TokenType::LeftBracket){
+			values.push(parseAnnotationValue());
 
-            std::vector<std::pair<std::string, std::string>> args;
-            if (match(TokenType::LeftParen)) {
-                if (!check(TokenType::RightParen)) {
-                    do {
-                        std::string key = expect(TokenType::Identifier, "Expected annotation argument name").value;
-                        std::string val;
-                        if (match(TokenType::Assign)) {
-                            // Value can be identifier, number, string, or keyword like true/false
-                            val = current().value;
-                            advance();
-                        }
-                        args.push_back({std::move(key), std::move(val)});
-                    } while (match(TokenType::Comma));
-                }
-                expect(TokenType::RightParen, "Expected ')' after annotation arguments");
+		}
+
+
+	}
+}
+
+
+std::vector<Annotation> parseAnnotations() {
+    std::vector<Annotation> annotations;
+
+    while (check(TokenType::At)) {
+        SourceLoc loc = currentLoc();
+        advance(); // consume @
+
+        std::string name = expect(TokenType::Identifier, "Expected annotation name after '@'").value;
+
+        std::vector<std::pair<std::string, std::string>> args;
+        if (match(TokenType::LeftParen)) {
+            if (!check(TokenType::RightParen)) {
+                do {
+                    std::string key = expect(TokenType::Identifier, "Expected annotation argument name").value;
+
+                    // 1) REQUIRE '='
+                    expect(TokenType::Assign, "Expected '=' after annotation argument name");
+
+                    // 2) ONLY accept literal-ish tokens as values
+                    Token t = current();
+                    std::string val;
+                    if (t.type == TokenType::String) {
+                        val = t.value; advance();
+                    } else if (t.type == TokenType::Integer || t.type == TokenType::Float) {
+                        val = t.value; advance();
+                    } else if (t.type == TokenType::Identifier) {
+                        // allow identifiers as symbolic values (e.g., enums)
+                        val = t.value; advance();
+                    } else if (t.type == TokenType::True || t.type == TokenType::False) {
+                        val = t.value; advance();
+                    } else {
+                        // 3) RECOVER: emit error and skip to next comma or ')'
+                        // Replace `errorAt` with whatever you use for reporting parse errors.
+                        errorAtToken(t, "Expected literal (string, number, identifier, true/false) after '=' in annotation");
+                        while (!check(TokenType::Comma) && !check(TokenType::RightParen) && !isAtEnd()) advance();
+                        // if we stopped at a comma, loop will consume it below; if at RightParen, we'll break correctly
+                        // skip pushing an arg for this broken entry
+                        if (check(TokenType::Comma)) { /* fallthrough to consume comma */ }
+                        else if (check(TokenType::RightParen)) { /* will close */ }
+                        continue;
+                    }
+
+                    args.push_back({std::move(key), std::move(val)});
+                } while (match(TokenType::Comma));
             }
-
-            annotations.push_back({std::move(name), std::move(args), loc});
+            expect(TokenType::RightParen, "Expected ')' after annotation arguments");
         }
 
-        return annotations;
+        annotations.push_back({std::move(name), std::move(args), loc});
     }
+
+    return annotations;
+}
 
     // --------------------------------------------------------
     // Type annotation parsing — just a name for now.
@@ -337,7 +375,7 @@ private:
             case TokenType::Class:
             case TokenType::Public:
             case TokenType::Private:
-                return parseClassOrFunction(std::move(annotations), false);
+                return parseClassOrFunction(std::move(annotations));
             case TokenType::Struct:
                 return parseStructDecl(std::move(annotations));
             case TokenType::Enum:
@@ -345,7 +383,7 @@ private:
             case TokenType::Static: {
                 // `static` can prefix a function inside a class — but at
                 // top-level it starts a declaration too.
-                return parseClassOrFunction(std::move(annotations), false);
+                return parseClassOrFunction(std::move(annotations));
             }
             case TokenType::Void:
             case TokenType::Auto:
@@ -360,13 +398,19 @@ private:
                 // Peek ahead: if name is followed by `(` it's a function.
                 if (peek(1).type == TokenType::Identifier &&
                     peek(2).type == TokenType::LeftParen) {
-                    return parseClassOrFunction(std::move(annotations), false);
+                    return parseClassOrFunction(std::move(annotations));
                 }
                 // Otherwise fall through to expression statement
                 // (which will fail gracefully if it's truly invalid)
                 [[fallthrough]];
             }
             default:
+                // A bare identifier followed by (...) { is a function
+                // declaration with no type prefix or visibility modifier,
+                // e.g.  foo() { ... }   or   add(a, b) { return a+b; }
+                if (check(TokenType::Identifier) && isBareFunction()) {
+                    return parseClassOrFunction(std::move(annotations));
+                }
                 if (!annotations.empty()) {
                     error("Annotations can only precede declarations");
                     synchronize();
@@ -654,7 +698,7 @@ private:
     // Handles: [public|private] [static] [returnType] name(...)
     // Peeks ahead to figure out what we're looking at.
     // --------------------------------------------------------
-    StmtPtr parseClassOrFunction(std::vector<Annotation> annotations, bool insideClass) {
+    StmtPtr parseClassOrFunction(std::vector<Annotation> annotations) {
         SourceLoc loc = currentLoc();
         bool isPublic = true;   // default
         bool isStatic = false;
@@ -1232,6 +1276,50 @@ private:
         ExprPtr expr = parseExpression();
         expect(TokenType::RightParen, "Expected ')'");
         return expr;
+    }
+
+    // Lookahead: current token is an Identifier.  Scan forward past the
+    // matching parentheses and check whether `{` follows the closing `)`.
+    // If so this is a bare function declaration (no type / modifier prefix).
+    //     foo(...)  {   →  true   (function decl)
+    //     foo(...)  ;   →  false  (expression statement)
+    bool isBareFunction() const {
+        // pos_ must be at Identifier and pos_+1 must be '('
+        if (pos_ + 1 >= tokens_.size() ||
+            tokens_[pos_ + 1].type != TokenType::LeftParen)
+            return false;
+
+        int depth = 0;
+        size_t i = pos_ + 1;   // start at the '('
+        while (i < tokens_.size()) {
+            if (tokens_[i].type == TokenType::LeftParen)  depth++;
+            if (tokens_[i].type == TokenType::RightParen) {
+                depth--;
+                if (depth == 0) {
+                    // Move past the closing ')' to the next token
+                    size_t j = i + 1;
+                    if (j >= tokens_.size()) return false;
+
+                    // Skip optional  -> returnType  suffix so that
+                    //   name() -> int32 { … }
+                    // is recognised the same as
+                    //   name() { … }
+                    if (tokens_[j].type == TokenType::Arrow) {
+                        j++;  // skip ->
+                        if (j < tokens_.size() &&
+                            (isTypeToken(tokens_[j].type) ||
+                             tokens_[j].type == TokenType::Identifier)) {
+                            j++;  // skip the type name
+                        }
+                    }
+
+                    return (j < tokens_.size() &&
+                            tokens_[j].type == TokenType::LeftBrace);
+                }
+            }
+            i++;
+        }
+        return false;
     }
 
     // Lookahead: scan for the matching `)` and check if `=>` follows.

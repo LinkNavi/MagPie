@@ -1,11 +1,10 @@
-
 // --- imports: selective importing to avoid collisions ---
 #include <engine/time>
 #include <engine/physics>
 #include <engine/console> { Print, Log }
 
 // --- compile mode: jit is default, so no annotation needed unless overriding ---
-@compile(mode="aot")
+@compile(aot)
 
 // --- permissions: restricts FROM a project-level default, rather than granting ---
 @permissions(restrict=[networking])

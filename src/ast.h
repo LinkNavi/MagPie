@@ -33,13 +33,13 @@
 //     ClassDecl, StructDecl, EnumDecl, IncludeDecl
 // ------------------------------------------------------------
 
-#include "token.h"
+
 
 #include <string>
 #include <vector>
 #include <memory>
-#include <optional>
-#include <variant>
+
+
 #include <ostream>
 
 namespace scriptlang {
@@ -178,8 +178,11 @@ struct Parameter {
 // ============================================================
 struct Annotation {
     std::string                          name;
-    std::vector<std::pair<std::string, std::string>> args;  // key=value pairs (value may be empty)
+    
+std::vector<std::pair<std::string, Annotation>> args;
+
     SourceLoc                            loc;
+std::vector<Annotation> array;  // for Array
 };
 
 // ============================================================
