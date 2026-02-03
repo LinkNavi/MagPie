@@ -463,23 +463,24 @@ ComponentBinder& property(const std::string& name,
     return it->second.getter(obj);
   }
 
-  void setProperty(void *obj, const std::string &name,
-                   const Value &val) const { // Add const
-    auto it = properties_.find(name);
-    if (it == properties_.end())
-      throw std::runtime_error("Property not found: " + name);
-    if (!it->second.setter)
-      throw std::runtime_error("Property is read-only: " + name);
-    it->second.setter(obj, val);
-  }
+ void setProperty(void *obj, const std::string &name,
+                 const Value &val) const {  // Add const here
+  auto it = properties_.find(name);
+  if (it == properties_.end())
+    throw std::runtime_error("Property not found: " + name);
+  if (!it->second.setter)
+    throw std::runtime_error("Property is read-only: " + name);
+  it->second.setter(obj, val);
+}
 
-  Value callMethod(void *obj, const std::string &name,
-                   const std::vector<Value> &args) const { // Add const
-    auto it = methods_.find(name);
-    if (it == methods_.end())
-      throw std::runtime_error("Method not found: " + name);
-    return it->second(obj, args);
-  }
+// Around line 391, add const qualifier to callMethod:
+Value callMethod(void *obj, const std::string &name,
+                 const std::vector<Value> &args) const {  // Add const here
+  auto it = methods_.find(name);
+  if (it == methods_.end())
+    throw std::runtime_error("Method not found: " + name);
+  return it->second(obj, args);
+}
 
 private:
   std::string typeName_;
