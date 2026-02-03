@@ -42,7 +42,10 @@ source_headers = files(
     'src/semantic_analyzer.h',
     'src/lexer.h',
     'src/parser.h',
+    'src/arena.h',
     'src/codegen.h',
+    'src/jit_compiler.h',
+    'src/hot_reload.h'
 )
 
 amalgamated_header = custom_target(
@@ -73,6 +76,7 @@ test_sources = files(
     'tests/test_lexer.cpp',
     'tests/test_parser.cpp',
     'tests/test_semantic.cpp',
+    'tests/test_codegen.cpp',
 )
 
 test_exe = executable(
@@ -83,7 +87,12 @@ test_exe = executable(
 )
 
 test('scriptlang tests', test_exe)
-
+executable(
+    'scriptlang_jit',
+    sources: ['tests/jit_runner.cpp'],
+    dependencies: [scriptlang_dep],
+    include_directories: [include_directories('tests')],
+)
 # ---------------------------------------------------------------------------
 # Debug dump tool
 # Reads a .sl source file and writes two files next to it:

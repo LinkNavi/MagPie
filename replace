@@ -1,0 +1,32 @@
+#!/bin/bash
+
+# replace_malloc.sh - Replace malloc calls with arenaAlloc in codegen.h
+
+CODEGEN_FILE="$1"
+
+if [ -z "$CODEGEN_FILE" ]; then
+    echo "Usage: ./replace_malloc.sh path/to/codegen.h"
+    exit 1
+fi
+
+if [ ! -f "$CODEGEN_FILE" ]; then
+    echo "File not found: $CODEGEN_FILE"
+    exit 1
+fi
+
+# Backup
+cp "$CODEGEN_FILE" "${CODEGEN_FILE}.bak"
+
+# Replace patterns:
+# builder_.CreateCall(mallocFn, {size}, "name")  ->  arenaAlloc(size)
+# builder_.CreateCall(getOrDeclareMalloc(), {size}, "name")  ->  arenaAlloc(size)
+
+sed -i -E '
+s/builder_\.CreateCall\(mallocFn, \{([^}]+)\}, "[^"]*"\)/arenaAlloc(\1)/g
+s/builder_\.CreateCall\(getOrDeclareMalloc\(\), \{([^}]+)\}, "[^"]*"\)/arenaAlloc(\1)/g
+s/llvm::Value \*rawPtr = builder_\.CreateCall\(mallocFn, \{([^}]+)\}\);/llvm::Value *rawPtr = arenaAlloc(\1);/g
+' "$CODEGEN_FILE"
+
+echo "Done. Backup saved as ${CODEGEN_FILE}.bak"
+echo "Replacements made:"
+grep -n "arenaAlloc" "$CODEGEN_FILE" | head -20

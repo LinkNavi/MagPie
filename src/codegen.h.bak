@@ -54,7 +54,6 @@ private:
   void generateClassDecl(const ClassDecl *cls);
   void generateStructDecl(const StructDecl *strct);
   void generateFunctionDecl(const FunctionDecl *func);
-
   void generateVarDecl(const VarDecl *var);
   void generateConstDecl(const ConstDecl *constDecl);
   void generateEnumDecl(const EnumDecl *enumDecl);
@@ -158,23 +157,12 @@ inline LLVMCodeGen::LLVMCodeGen(TypeContext &types, SymbolTable &symbols)
 
 inline std::unique_ptr<llvm::Module>
 LLVMCodeGen::generate(const Program &program) {
- module_ = std::make_unique<llvm::Module>("scriptlang_module", context_);
+  module_ = std::make_unique<llvm::Module>("scriptlang_module", context_);
   module_->setDataLayout(
       "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128");
   module_->setTargetTriple(llvm::Triple("x86_64-pc-linux-gnu"));
-  
-  // Arena memory management setup
-  frameArena_ = new llvm::GlobalVariable(
-      *module_, builder_.getPtrTy(), false,
-      llvm::GlobalValue::ExternalLinkage, nullptr, "g_frame_arena");
-  
-  llvm::FunctionType *arenaAllocTy = llvm::FunctionType::get(
-      builder_.getPtrTy(),
-      {builder_.getPtrTy(), builder_.getInt64Ty()},
-      false);
-  llvm::Function::Create(arenaAllocTy, llvm::Function::ExternalLinkage,
-      "sl_arena_alloc", module_.get());
-  
+llvm::Function::Create(arenaAllocTy, llvm::Function::ExternalLinkage,
+    "sl_arena_alloc", module_.get());
   declareEngineFunctions();
 
   // Pass 1: Register classes/structs/enums
@@ -781,7 +769,7 @@ inline llvm::Value *LLVMCodeGen::generateStringConcat(llvm::Value *left, llvm::V
   llvm::Value *allocSize = builder_.CreateAdd(totalLen, builder_.getInt64(1), "allocsize"); // +1 for null
   
   // Allocate new buffer
-  llvm::Value *newStr = arenaAlloc(allocSize);
+  llvm::Value *newStr = builder_.CreateCall(mallocFn, {allocSize}, "newstr");
   
   // Copy first string
   builder_.CreateCall(memcpyFn, {newStr, left, len1, builder_.getFalse()});
@@ -1356,7 +1344,7 @@ LLVMCodeGen::generateArrayLiteralExpr(const ArrayLiteralExpr *arr) {
       builder_.getInt64(module_->getDataLayout().getTypeAllocSize(elemType));
   llvm::Value *totalSize =
       builder_.CreateMul(elemSize, builder_.getInt64(count));
-  llvm::Value *rawPtr = arenaAlloc(totalSize);
+  llvm::Value *rawPtr = builder_.CreateCall(mallocFn, {totalSize}, "arr.alloc");
 
   // Store first element
   builder_.CreateStore(firstElem, rawPtr);
@@ -1678,7 +1666,7 @@ inline void LLVMCodeGen::generateClassConstructor(const ClassDecl *cls,
   llvm::Value *size = llvm::ConstantInt::get(
       builder_.getInt64Ty(),
       module_->getDataLayout().getTypeAllocSize(info.structType));
-  llvm::Value *ptr = arenaAlloc(size);
+  llvm::Value *ptr = builder_.CreateCall(mallocFn, {size}, "obj");
 
   auto oldThisPtr = currentThisPtr_;
   auto oldClassName = currentClassName_;
@@ -2081,7 +2069,7 @@ inline llvm::Value *LLVMCodeGen::intToString(llvm::Value *val) {
   llvm::Function *mallocFn = getOrDeclareMalloc();
   
   // Allocate buffer (32 bytes is enough for any 64-bit int)
-  llvm::Value *buf = arenaAlloc(builder_.getInt64(32));
+  llvm::Value *buf = builder_.CreateCall(mallocFn, {builder_.getInt64(32)}, "intbuf");
   
   // Format string for integer
   llvm::Value *fmt = createStringConstant("%d");

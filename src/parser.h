@@ -611,45 +611,57 @@ private:
   // --------------------------------------------------------
   // if (cond) block [else ...]
   // --------------------------------------------------------
-  StmtPtr parseIf() {
-    SourceLoc loc = currentLoc();
-    advance(); // consume `if`
+StmtPtr parseIf() {
+  SourceLoc loc = currentLoc();
+  advance(); // consume `if`
 
-    expect(TokenType::LeftParen, "Expected '(' after 'if'");
-    ExprPtr cond = parseExpression();
-    expect(TokenType::RightParen, "Expected ')' after if condition");
+  expect(TokenType::LeftParen, "Expected '(' after 'if'");
+  ExprPtr cond = parseExpression();
+  expect(TokenType::RightParen, "Expected ')' after if condition");
 
-    StmtPtr thenBranch = parseBlock();
-
-    StmtPtr elseBranch;
-    if (match(TokenType::Else)) {
-      if (check(TokenType::If)) {
-        elseBranch = parseIf(); // else-if chain
-      } else {
-        elseBranch = parseBlock();
-      }
-    }
-
-    return std::make_unique<IfStatement>(std::move(cond), std::move(thenBranch),
-                                         std::move(elseBranch), loc);
+  // Allow either block or single statement
+  StmtPtr thenBranch;
+  if (check(TokenType::LeftBrace)) {
+    thenBranch = parseBlock();
+  } else {
+    thenBranch = parseStatement();
   }
+
+  StmtPtr elseBranch;
+  if (match(TokenType::Else)) {
+    if (check(TokenType::If)) {
+      elseBranch = parseIf(); // else-if chain
+    } else if (check(TokenType::LeftBrace)) {
+      elseBranch = parseBlock();
+    } else {
+      elseBranch = parseStatement();
+    }
+  }
+
+  return std::make_unique<IfStatement>(std::move(cond), std::move(thenBranch),
+                                       std::move(elseBranch), loc);
+}
 
   // --------------------------------------------------------
   // while (cond) block
   // --------------------------------------------------------
-  StmtPtr parseWhile() {
-    SourceLoc loc = currentLoc();
-    advance(); // consume `while`
+ StmtPtr parseWhile() {
+  SourceLoc loc = currentLoc();
+  advance(); // consume `while`
 
-    expect(TokenType::LeftParen, "Expected '(' after 'while'");
-    ExprPtr cond = parseExpression();
-    expect(TokenType::RightParen, "Expected ')' after while condition");
+  expect(TokenType::LeftParen, "Expected '(' after 'while'");
+  ExprPtr cond = parseExpression();
+  expect(TokenType::RightParen, "Expected ')' after while condition");
 
-    StmtPtr body = parseBlock();
-
-    return std::make_unique<WhileStatement>(std::move(cond), std::move(body),
-                                            loc);
+  StmtPtr body;
+  if (check(TokenType::LeftBrace)) {
+    body = parseBlock();
+  } else {
+    body = parseStatement();
   }
+
+  return std::make_unique<WhileStatement>(std::move(cond), std::move(body), loc);
+}
 
   // --------------------------------------------------------
   // for — either C-style or for-in.
