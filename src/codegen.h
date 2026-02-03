@@ -56,7 +56,31 @@ private:
     void generateConstDecl(const ConstDecl* constDecl);
     void generateEnumDecl(const EnumDecl* enumDecl);
     void generateIncludeDecl(const IncludeDecl* inc);
+llvm::Type* resolveTypeFromAnnotation(const TypeAnnotation* typeAnnot);
+llvm::Type* getTypeForVar(const VarDecl* var);
+ llvm::Type* resolveVarType(
+    const std::string& name,
+    const TypeAnnotation* typeAnnot,
+    const Expression* initializer
+);
 
+ std::unordered_map<std::string, llvm::StructType*> classTypes_;
+    llvm::Value* currentThisPtr_ = nullptr;  // for 'this' in methods
+    
+    // New methods
+    void generateClassMethod(const ClassDecl* cls,
+                            const FunctionDecl* method,
+                            llvm::StructType* classType);
+    void generateMethodBody(const FunctionDecl* method,
+                           llvm::Function* methodFunc,
+                           llvm::StructType* classType);
+    void generateClassConstructor(const ClassDecl* cls,
+                                 llvm::StructType* classType);
+    llvm::Function* getOrDeclareMalloc();
+    llvm::Type* resolveVarType(const std::string& name,
+                              const TypeAnnotation* typeAnnot,
+                              const Expression* initializer);
+    llvm::Type* resolveTypeFromAnnotation(const TypeAnnotation* typeAnnot);
     // --------------------------------------------------------
     // Function body generation
     // --------------------------------------------------------
@@ -614,6 +638,18 @@ inline llvm::Type* LLVMCodeGen::toLLVMType(TypePtr type) {
     }
 }
 
+
+inline llvm::Type* LLVMCodeGen::getTypeForVar(const VarDecl* var) {
+    // Option 1: Look up in symbol table (semantic analyzer already resolved it)
+    const Symbol* sym = symbols_.lookup(var->name);
+    if (sym && sym->type) {
+        return toLLVMType(sym->type);
+    }
+    
+    // Option 2: Resolve from annotation
+    return resolveTypeFromAnnotation(var->typeAnnot.get());
+}
+
 inline llvm::AllocaInst* LLVMCodeGen::createEntryBlockAlloca(
     llvm::Function* func, const std::string& varName, llvm::Type* type
 ) {
@@ -646,44 +682,446 @@ inline void LLVMCodeGen::error(const std::string& msg) {
 }
 
 // Stub implementations for unimplemented functions
-inline void LLVMCodeGen::generateClassDecl(const ClassDecl*) { /* TODO */ }
+inline void LLVMCodeGen::generateClassDecl(const ClassDecl* cls) {
+    // Step 1: Create the struct type for the class layout
+    std::vector<llvm::Type*> fieldTypes;
+    
+    // Collect field types from members
+    for (const auto& member : cls->members) {
+        if (auto* varDecl = dynamic_cast<const VarDecl*>(member.decl.get())) {
+            llvm::Type* fieldType = resolveVarType(
+                varDecl->name,
+                varDecl->typeAnnot.get(),
+                varDecl->initializer.get()
+            );
+            fieldTypes.push_back(fieldType);
+        }
+    }
+    
+    // Create the struct type
+    llvm::StructType* classType = llvm::StructType::create(
+        context_,
+        fieldTypes,
+        cls->name  // struct name
+    );
+    
+    // Store the class type for later use
+    classTypes_[cls->name] = classType;
+    
+    // Step 2: Generate methods
+    for (const auto& member : cls->members) {
+        if (auto* funcDecl = dynamic_cast<const FunctionDecl*>(member.decl.get())) {
+            generateClassMethod(cls, funcDecl, classType);
+        }
+    }
+    
+    // Step 3: Generate constructor (if needed)
+    generateClassConstructor(cls, classType);
+}
+
+inline void LLVMCodeGen::generateClassMethod(
+    const ClassDecl* cls,
+    const FunctionDecl* method,
+    llvm::StructType* classType
+) {
+    // Methods are just functions with an implicit 'this' parameter
+    // Example: int32 Player.getHealth(Player* this)
+    
+    std::vector<llvm::Type*> paramTypes;
+    
+    // First parameter is always 'this' pointer
+    paramTypes.push_back(llvm::PointerType::get(context_, 0));
+    
+    // Add explicit parameters
+    for (const auto& param : method->params) {
+        llvm::Type* paramType = resolveTypeFromAnnotation(param.typeAnnot.get());
+        paramTypes.push_back(paramType);
+    }
+    
+    // Determine return type
+    llvm::Type* retType = method->returnType
+        ? resolveTypeFromAnnotation(method->returnType.get())
+        : builder_.getVoidTy();
+    
+    // Create function type
+    llvm::FunctionType* methodType = llvm::FunctionType::get(
+        retType,
+        paramTypes,
+        false  // not variadic
+    );
+    
+    // Create function with mangled name: ClassName_methodName
+    std::string mangledName = cls->name + "_" + method->name;
+    llvm::Function* methodFunc = llvm::Function::Create(
+        methodType,
+        llvm::Function::ExternalLinkage,
+        mangledName,
+        module_.get()
+    );
+    
+    // Name the parameters
+    auto argIt = methodFunc->arg_begin();
+    
+    // First arg is 'this'
+    llvm::Argument* thisArg = argIt++;
+    thisArg->setName("this");
+    
+    // Rest are method parameters
+    for (size_t i = 0; i < method->params.size(); ++i, ++argIt) {
+        argIt->setName(method->params[i].name);
+    }
+    
+    // Store function for later lookup
+    functions_[mangledName] = methodFunc;
+    
+    // Generate method body
+    if (method->body) {
+        generateMethodBody(method, methodFunc, classType);
+    }
+}
+
+inline void LLVMCodeGen::generateMethodBody(
+    const FunctionDecl* method,
+    llvm::Function* methodFunc,
+    llvm::StructType* classType
+) {
+    // Create entry block
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(context_, "entry", methodFunc);
+    builder_.SetInsertPoint(entry);
+    
+    // Save old state
+    auto oldFunction = currentFunction_;
+    auto oldNamedValues = namedValues_;
+    auto oldThisPtr = currentThisPtr_;
+    
+    currentFunction_ = methodFunc;
+    namedValues_.clear();
+    
+    // Store 'this' pointer for member access
+    auto argIt = methodFunc->arg_begin();
+    currentThisPtr_ = argIt++;  // First arg is 'this'
+    
+    // Allocate and store method parameters (skip 'this')
+    for (size_t i = 0; i < method->params.size(); ++i, ++argIt) {
+        const auto& param = method->params[i];
+        argIt->setName(param.name);
+        
+        llvm::AllocaInst* alloca = createEntryBlockAlloca(
+            methodFunc, param.name, argIt->getType()
+        );
+        builder_.CreateStore(argIt, alloca);
+        namedValues_[param.name] = alloca;
+    }
+    
+    // Generate body
+    if (auto* block = dynamic_cast<const BlockStatement*>(method->body.get())) {
+        generateBlockStatement(block);
+    } else {
+        generateStatement(method->body.get());
+    }
+    
+    // Add return if missing
+    if (!builder_.GetInsertBlock()->getTerminator()) {
+        if (methodFunc->getReturnType()->isVoidTy()) {
+            builder_.CreateRetVoid();
+        } else {
+            error("Method '" + method->name + "' missing return statement");
+            builder_.CreateRet(llvm::Constant::getNullValue(methodFunc->getReturnType()));
+        }
+    }
+    
+    // Verify
+    std::string errMsg;
+    llvm::raw_string_ostream errStream(errMsg);
+    if (llvm::verifyFunction(*methodFunc, &errStream)) {
+        llvm::errs() << "Method verification failed for '" << method->name << "':\n" 
+                     << errMsg << "\n";
+        hasError_ = true;
+    }
+    
+    // Restore state
+    currentFunction_ = oldFunction;
+    namedValues_ = std::move(oldNamedValues);
+    currentThisPtr_ = oldThisPtr;
+}
+
+inline void LLVMCodeGen::generateClassConstructor(
+    const ClassDecl* cls,
+    llvm::StructType* classType
+) {
+    // Generate default constructor: ClassName* ClassName_new()
+    
+    llvm::FunctionType* ctorType = llvm::FunctionType::get(
+        llvm::PointerType::get(context_, 0),  // returns pointer to class
+        {},  // no parameters (for default constructor)
+        false
+    );
+    
+    std::string ctorName = cls->name + "_new";
+    llvm::Function* ctorFunc = llvm::Function::Create(
+        ctorType,
+        llvm::Function::ExternalLinkage,
+        ctorName,
+        module_.get()
+    );
+    
+    // Create entry block
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(context_, "entry", ctorFunc);
+    builder_.SetInsertPoint(entry);
+    
+    // Allocate memory on heap (call malloc)
+    llvm::Function* mallocFunc = getOrDeclareMalloc();
+    llvm::Value* size = llvm::ConstantInt::get(
+        builder_.getInt64Ty(),
+        module_->getDataLayout().getTypeAllocSize(classType)
+    );
+    llvm::Value* ptr = builder_.CreateCall(mallocFunc, {size}, "obj");
+    
+    // Cast to class pointer type
+    llvm::Value* objPtr = builder_.CreateBitCast(
+        ptr,
+        llvm::PointerType::get(context_, 0),
+        "objptr"
+    );
+    
+    // Initialize fields with default values
+    int fieldIndex = 0;
+    for (const auto& member : cls->members) {
+        if (auto* varDecl = dynamic_cast<const VarDecl*>(member.decl.get())) {
+            // Get pointer to field
+            llvm::Value* fieldPtr = builder_.CreateStructGEP(
+                classType,
+                objPtr,
+                fieldIndex,
+                varDecl->name
+            );
+            
+            // Initialize field
+            if (varDecl->initializer) {
+                // Save state
+                auto oldThisPtr = currentThisPtr_;
+                currentThisPtr_ = objPtr;
+                
+                llvm::Value* initVal = generateExpression(varDecl->initializer.get());
+                if (initVal) {
+                    builder_.CreateStore(initVal, fieldPtr);
+                }
+                
+                currentThisPtr_ = oldThisPtr;
+            } else {
+                // Zero-initialize
+                llvm::Type* fieldType = classType->getElementType(fieldIndex);
+                builder_.CreateStore(
+                    llvm::Constant::getNullValue(fieldType),
+                    fieldPtr
+                );
+            }
+            
+            fieldIndex++;
+        }
+    }
+    
+    // Return the object pointer
+    builder_.CreateRet(objPtr);
+    
+    // Store constructor function
+    functions_[ctorName] = ctorFunc;
+}
+
+inline llvm::Function* LLVMCodeGen::getOrDeclareMalloc() {
+    llvm::Function* mallocFunc = module_->getFunction("malloc");
+    if (mallocFunc) {
+        return mallocFunc;
+    }
+    
+    // Declare: void* malloc(size_t size)
+    llvm::FunctionType* mallocType = llvm::FunctionType::get(
+        llvm::PointerType::get(context_, 0),
+        {builder_.getInt64Ty()},
+        false
+    );
+    
+    mallocFunc = llvm::Function::Create(
+        mallocType,
+        llvm::Function::ExternalLinkage,
+        "malloc",
+        module_.get()
+    );
+    
+    return mallocFunc;
+}
+
+
 inline void LLVMCodeGen::generateStructDecl(const StructDecl*) { /* TODO */ }
+
+
+
+inline llvm::Type* LLVMCodeGen::resolveVarType(
+    const std::string& name,
+    const TypeAnnotation* typeAnnot,
+    const Expression* initializer
+) {
+    // Try 1: Look up in symbol table (most reliable)
+    const Symbol* sym = symbols_.lookup(name);
+    if (sym && sym->type) {
+        return toLLVMType(sym->type);
+    }
+    
+    // Try 2: Use type annotation if provided
+    if (typeAnnot) {
+        return resolveTypeFromAnnotation(typeAnnot);
+    }
+    
+    // Try 3: Infer from initializer expression
+    if (initializer) {
+        // TODO: Add expression type inference
+        // For now, just check if it's a literal
+        if (auto* lit = dynamic_cast<const LiteralExpr*>(initializer)) {
+            switch (lit->kind) {
+                case LiteralKind::Integer:
+                case LiteralKind::HexInteger:
+                case LiteralKind::BinaryInteger:
+                    return builder_.getInt32Ty();
+                case LiteralKind::Float:
+                case LiteralKind::Scientific:
+                    return builder_.getDoubleTy();
+                case LiteralKind::True:
+                case LiteralKind::False:
+                    return builder_.getInt1Ty();
+                case LiteralKind::String:
+                case LiteralKind::RawString:
+                    return builder_.getPtrTy();
+                default:
+                    break;
+            }
+        }
+    }
+    
+    // Fallback: int32
+    error("Cannot determine type for variable '" + name + "', defaulting to int32");
+    return builder_.getInt32Ty();
+}
+
+inline llvm::Type* LLVMCodeGen::resolveTypeFromAnnotation(const TypeAnnotation* typeAnnot) {
+    if (!typeAnnot) {
+        return builder_.getInt32Ty();
+    }
+    
+    const std::string& typeName = typeAnnot->name;
+    
+    if (typeName == "int8")    return builder_.getInt8Ty();
+    if (typeName == "int16")   return builder_.getInt16Ty();
+    if (typeName == "int32")   return builder_.getInt32Ty();
+    if (typeName == "int64")   return builder_.getInt64Ty();
+    if (typeName == "uint8")   return builder_.getInt8Ty();
+    if (typeName == "uint16")  return builder_.getInt16Ty();
+    if (typeName == "uint32")  return builder_.getInt32Ty();
+    if (typeName == "uint64")  return builder_.getInt64Ty();
+    if (typeName == "float32") return builder_.getFloatTy();
+    if (typeName == "float64") return builder_.getDoubleTy();
+    if (typeName == "bool")    return builder_.getInt1Ty();
+    if (typeName == "void")    return builder_.getVoidTy();
+    if (typeName == "string")  return builder_.getPtrTy();
+    
+    TypePtr scriptType = types_.lookupByName(typeName);
+    if (scriptType) {
+        return toLLVMType(scriptType);
+    }
+    
+    error("Unknown type: " + typeName);
+    return builder_.getInt32Ty();
+}
+
 inline void LLVMCodeGen::generateVarDecl(const VarDecl* var) {
     if (!currentFunction_) {
-        // Global variable - TODO
         error("Global variables not yet supported");
         return;
     }
     
-    // Local variable
-    llvm::Type* varType = builder_.getInt32Ty(); // TODO: resolve from var->typeAnnot
+    llvm::Type* varType = resolveVarType(var->name, var->typeAnnot.get(), 
+                                         var->initializer.get());
     
-    // Create alloca
     llvm::AllocaInst* alloca = createEntryBlockAlloca(
         currentFunction_, var->name, varType
     );
     
-    // Store initial value if provided
     if (var->initializer) {
         llvm::Value* initVal = generateExpression(var->initializer.get());
         if (initVal) {
             builder_.CreateStore(initVal, alloca);
         }
     } else {
-        // Initialize to zero
         builder_.CreateStore(llvm::Constant::getNullValue(varType), alloca);
     }
     
-    // Register in symbol table
     namedValues_[var->name] = alloca;
 }
-inline void LLVMCodeGen::generateConstDecl(const ConstDecl*) { /* TODO */ }
-inline void LLVMCodeGen::generateEnumDecl(const EnumDecl*) { /* TODO */ }
+
+inline void LLVMCodeGen::generateConstDecl(const ConstDecl* constDecl) {
+    if (!currentFunction_) {
+        error("Global constants not yet supported");
+        return;
+    }
+    
+    llvm::Type* varType = resolveVarType(constDecl->name, constDecl->typeAnnot.get(),
+                                         constDecl->initializer.get());
+    
+    llvm::AllocaInst* alloca = createEntryBlockAlloca(
+        currentFunction_, constDecl->name, varType
+    );
+    
+    if (constDecl->initializer) {
+        llvm::Value* initVal = generateExpression(constDecl->initializer.get());
+        if (initVal) {
+            builder_.CreateStore(initVal, alloca);
+        }
+    } else {
+        builder_.CreateStore(llvm::Constant::getNullValue(varType), alloca);
+    }
+    
+    namedValues_[constDecl->name] = alloca;
+}
+
+inline void LLVMCodeGen::generateEnumDecl(const EnumDecl*) { 
+
+
+}
+
+
+
 inline void LLVMCodeGen::generateIncludeDecl(const IncludeDecl*) { /* Already handled */ }
 inline void LLVMCodeGen::generateForStatement(const ForStatement*) { /* TODO */ }
 inline void LLVMCodeGen::generateForInStatement(const ForInStatement*) { /* TODO */ }
 inline void LLVMCodeGen::generateSwitchStatement(const SwitchStatement*) { /* TODO */ }
-inline llvm::Value* LLVMCodeGen::generateMemberExpr(const MemberExpr*) { return nullptr; }
+
+inline llvm::Value* LLVMCodeGen::generateMemberExpr(const MemberExpr* member) {
+    // Get the object
+    llvm::Value* obj = generateExpression(member->object.get());
+    if (!obj) return nullptr;
+    
+    // For now, assume object is 'this'
+    if (auto* idExpr = dynamic_cast<const IdentifierExpr*>(member->object.get())) {
+        if (idExpr->name == "this" || currentThisPtr_) {
+            // Access class field
+            // TODO: Look up field index by name
+            // For now, just error
+            error("Member access not fully implemented yet");
+            return nullptr;
+        }
+    }
+    
+    error("Complex member access not yet supported");
+    return nullptr;
+}
+
+inline llvm::Value* LLVMCodeGen::generateThisExpr(const ThisExpr* thisExpr) {
+    if (currentThisPtr_) {
+        return currentThisPtr_;
+    }
+    error("'this' used outside of class method");
+    return nullptr;
+}
+
 inline llvm::Value* LLVMCodeGen::generateOptionalMemberExpr(const OptionalMemberExpr*) { return nullptr; }
 inline llvm::Value* LLVMCodeGen::generateIndexExpr(const IndexExpr*) { return nullptr; }
 inline llvm::Value* LLVMCodeGen::generateNewExpr(const NewExpr*) { return nullptr; }
@@ -691,7 +1129,7 @@ inline llvm::Value* LLVMCodeGen::generateArrayLiteralExpr(const ArrayLiteralExpr
 inline llvm::Value* LLVMCodeGen::generateNullCoalesceExpr(const NullCoalesceExpr*) { return nullptr; }
 inline llvm::Value* LLVMCodeGen::generateTernaryExpr(const TernaryExpr*) { return nullptr; }
 inline llvm::Value* LLVMCodeGen::generateLambdaExpr(const LambdaExpr*) { return nullptr; }
-inline llvm::Value* LLVMCodeGen::generateThisExpr(const ThisExpr*) { return nullptr; }
+
 inline llvm::Value* LLVMCodeGen::generateSuperExpr(const SuperExpr*) { return nullptr; }
 inline llvm::Value* LLVMCodeGen::generateSpreadExpr(const SpreadExpr*) { return nullptr; }
 inline llvm::Value* LLVMCodeGen::generateRangeExpr(const RangeExpr*) { return nullptr; }
