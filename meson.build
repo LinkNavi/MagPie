@@ -24,7 +24,7 @@ source_headers = files(
     'src/lexer.h',
     'src/parser.h',
 )
-
+llvm_dep = dependency('llvm', version: '>=18.0')
 amalgamated_header = custom_target(
     'scriptlang.h',
     input:   source_headers,

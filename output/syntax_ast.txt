@@ -7,23 +7,19 @@ Program:
   IncludeDecl: <engine/console> { Print, Log }
   ClassDecl: Player
     Annotation: @compile(mode=aot)
-    Annotation: @permissions
+    Annotation: @permissions(restrict=[networking])
     member[0]: [private]
-      FunctionDecl: playerHealth  [private]
-        Annotation: @expose(min=0, max=100, step=1, tooltip=The player's health (0 = dead), group=Stats)
-        returnType:
-          TypeAnnotation: int32
-        Param: =
-        body:
-          Block: (0 stmt(s))
+      Annotation: @expose(min=0, max=100, step=1, tooltip=The player's health (0 = dead), group=Stats)
+      VarDecl: playerHealth
+        TypeAnnotation: int32
+        init:
+          Literal: LiteralKind::Integer = "100"
     member[1]:
-      FunctionDecl: playerName
-        Annotation: @expose(maxLength=32, tooltip=Display name shown above player, group=Identity)
-        returnType:
-          TypeAnnotation: string
-        Param: =
-        body:
-          Block: (0 stmt(s))
+      Annotation: @expose(maxLength=32, tooltip=Display name shown above player, group=Identity)
+      VarDecl: playerName
+        TypeAnnotation: string
+        init:
+          Literal: LiteralKind::String = "Bob"
     member[2]: [private]
       FunctionDecl: onInit  [private]
         Annotation: @lifecycle(phase=init)

@@ -51,10 +51,11 @@ TEST(parser_annotation_simple) {
 }
 
 TEST(parser_annotation_multiple_args) {
-    auto prog = parseSource(R"(
-        @expose(min=0, max=100, step=1, tooltip="Health value", group="Stats")
-        private int32 health = 100;
-    )");
+    const char* source = 
+        "@expose(min=0, max=100, step=1, tooltip=\"Health value\", group=\"Stats\")\n"
+        "private int32 health = 100;\n";
+    
+    auto prog = parseSource(source);
     
     auto* cls = getStmt<ClassDecl>(*prog);
     if (cls) {
@@ -84,7 +85,8 @@ TEST(parser_annotation_with_array_value) {
 }
 
 TEST(parser_annotation_with_string_value) {
-    auto prog = parseSource(R"(@compile(mode="aot") class Fast { })");
+    const char* source = "@compile(mode=\"aot\") class Fast { }";
+    auto prog = parseSource(source);
     auto* cls = getStmt<ClassDecl>(*prog);
     EXPECT_TRUE(cls != nullptr);
     EXPECT_SIZE(cls->annotations, 1);
@@ -92,11 +94,12 @@ TEST(parser_annotation_with_string_value) {
 }
 
 TEST(parser_multiple_annotations) {
-    auto prog = parseSource(R"(
-        @lifecycle(phase=update)
-        @expose(tooltip="Main update loop")
-        void onUpdate() { }
-    )");
+    const char* source = 
+        "@lifecycle(phase=update)\n"
+        "@expose(tooltip=\"Main update loop\")\n"
+        "void onUpdate() { }\n";
+    
+    auto prog = parseSource(source);
     auto* fn = getStmt<FunctionDecl>(*prog);
     EXPECT_TRUE(fn != nullptr);
     EXPECT_SIZE(fn->annotations, 2);
@@ -136,10 +139,11 @@ TEST(parser_annotation_invalid_placement_var) {
 
 TEST(parser_recovers_from_malformed_annotation) {
     Parser* parser = nullptr;
-    auto prog = parseSource(R"(
-        @bad(this is not valid syntax here)
-        class StillParsed { }
-    )", &parser);
+    const char* source = 
+        "@bad(this is not valid syntax here)\n"
+        "class StillParsed { }\n";
+    
+    auto prog = parseSource(source, &parser);
     
     // Should have errors but still parse the class
     EXPECT_TRUE(parser != nullptr);
@@ -155,37 +159,36 @@ TEST(parser_recovers_from_malformed_annotation) {
 // ============================================================
 
 TEST(parser_full_class_with_annotations) {
-    const char* source = R"(
-        @compile(mode=aot)
-        @permissions(restrict=[networking])
-        public class Player {
-            @expose(min=0, max=100, step=1, tooltip="The player's health (0 = dead)", group="Stats")
-            private int32 playerHealth = 100;
-            
-            @expose(maxLength=32, tooltip="Display name shown above player", group="Identity")
-            public string playerName = "Bob";
-            
-            @lifecycle(phase=init)
-            private void onInit() {
-                // initial setup
-            }
-            
-            @lifecycle(phase=update)
-            private void onUpdate() {
-                if (isDead()) {
-                    Print("man im dead");
-                }
-            }
-            
-            int32 getHealth() {
-                return playerHealth;
-            }
-            
-            bool isDead() {
-                return getHealth() <= 0;
-            }
-        }
-    )";
+    const char* source = 
+        "@compile(mode=aot)\n"
+        "@permissions(restrict=[networking])\n"
+        "public class Player {\n"
+        "    @expose(min=0, max=100, step=1, tooltip=\"The player's health (0 = dead)\", group=\"Stats\")\n"
+        "    private int32 playerHealth = 100;\n"
+        "    \n"
+        "    @expose(maxLength=32, tooltip=\"Display name shown above player\", group=\"Identity\")\n"
+        "    public string playerName = \"Bob\";\n"
+        "    \n"
+        "    @lifecycle(phase=init)\n"
+        "    private void onInit() {\n"
+        "        // initial setup\n"
+        "    }\n"
+        "    \n"
+        "    @lifecycle(phase=update)\n"
+        "    private void onUpdate() {\n"
+        "        if (isDead()) {\n"
+        "            Print(\"man im dead\");\n"
+        "        }\n"
+        "    }\n"
+        "    \n"
+        "    int32 getHealth() {\n"
+        "        return playerHealth;\n"
+        "    }\n"
+        "    \n"
+        "    bool isDead() {\n"
+        "        return getHealth() <= 0;\n"
+        "    }\n"
+        "}\n";
     
     auto prog = parseSource(source);
     auto* cls = getStmt<ClassDecl>(*prog);
@@ -228,14 +231,13 @@ TEST(parser_full_class_with_annotations) {
 }
 
 TEST(parser_standalone_function_with_annotation) {
-    const char* source = R"(
-        #include <engine/console> { Print }
-        
-        @lifecycle(phase=update)
-        void onUpdate() {
-            Print("I am a simple script, no class needed.");
-        }
-    )";
+    const char* source = 
+        "#include <engine/console> { Print }\n"
+        "\n"
+        "@lifecycle(phase=update)\n"
+        "void onUpdate() {\n"
+        "    Print(\"I am a simple script, no class needed.\");\n"
+        "}\n";
     
     auto prog = parseSource(source);
     
@@ -296,7 +298,8 @@ TEST(parser_annotation_boolean_values) {
 }
 
 TEST(parser_annotation_mixed_array_types) {
-    auto prog = parseSource(R"(@config(values=[1, "two", three, 4.5, true]) class Mixed { })");
+    const char* source = "@config(values=[1, \"two\", three, 4.5, true]) class Mixed { }";
+    auto prog = parseSource(source);
     auto* cls = getStmt<ClassDecl>(*prog);
     EXPECT_TRUE(cls != nullptr);
     EXPECT_SIZE(cls->annotations, 1);
@@ -325,13 +328,13 @@ TEST(parser_backward_compatible_simple_annotation) {
 }
 
 TEST(parser_works_without_annotations) {
-    // Code without annotations should parse identically
-    auto prog = parseSource(R"(
-        class Simple {
-            var x = 10;
-            void doThing() { }
-        }
-    )");
+    const char* source = 
+        "class Simple {\n"
+        "    var x = 10;\n"
+        "    void doThing() { }\n"
+        "}\n";
+    
+    auto prog = parseSource(source);
     
     auto* cls = getStmt<ClassDecl>(*prog);
     EXPECT_TRUE(cls != nullptr);
