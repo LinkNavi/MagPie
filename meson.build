@@ -21,6 +21,10 @@ amalgamator = find_program('tools/amalgamate.py')
 source_headers = files(
     'src/token.h',
     'src/ast.h',
+    'src/types.h',
+    'src/symbol_table.h',
+    'src/type_checker.h',
+    'src/semantic_analyzer.h',
     'src/lexer.h',
     'src/parser.h',
 )
@@ -28,6 +32,8 @@ llvm_dep = dependency('llvm', version: '>=18.0')
 amalgamated_header = custom_target(
     'scriptlang.h',
     input:   source_headers,
+   depends : [llvm_dep],
+
     output:  'scriptlang.h',
     command: [amalgamator, '@INPUT@', '-o', '@OUTPUT@', '--guard', 'SCRIPTLANG_H'],
     install: true,
