@@ -32,8 +32,6 @@ llvm_dep = dependency('llvm', version: '>=18.0')
 amalgamated_header = custom_target(
     'scriptlang.h',
     input:   source_headers,
-   depends : [llvm_dep],
-
     output:  'scriptlang.h',
     command: [amalgamator, '@INPUT@', '-o', '@OUTPUT@', '--guard', 'SCRIPTLANG_H'],
     install: true,
@@ -57,6 +55,7 @@ scriptlang_dep = declare_dependency(
 test_sources = files(
     'tests/test_lexer.cpp',
     'tests/test_parser.cpp',
+    'tests/test_semantic.cpp',  # <-- Add this line
 )
 
 test_exe = executable(
