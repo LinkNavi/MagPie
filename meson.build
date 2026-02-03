@@ -34,19 +34,18 @@ amalgamator = find_program('tools/amalgamate.py')
 #       instantiates a Lexer internally, so the Lexer class definition must
 #       already be visible in the amalgamated output.
 source_headers = files(
-    'src/token.h',
-    'src/ast.h',
-    'src/types.h',
-    'src/symbol_table.h',
-    'src/type_checker.h',
-    'src/semantic_analyzer.h',
-    'src/lexer.h',
-    'src/parser.h',
-    'src/arena.h',
-    'src/codegen.h',
-    'src/jit_compiler.h',
-    'src/hot_reload.h',
-    'src/frontend.h'
+    'src/details/token.h',
+    'src/details/ast.h',
+    'src/details/types.h',
+    'src/details/symbol_table.h',
+    'src/details/type_checker.h',
+    'src/details/semantic_analyzer.h',
+    'src/details/lexer.h',
+    'src/details/parser.h',
+    'src/details/arena.h',
+    'src/details/codegen.h',
+    'src/details/jit_compiler.h',
+    'src/details/hot_reload.h',
 )
 
 amalgamated_header = custom_target(
@@ -64,6 +63,15 @@ scriptlang_dep = declare_dependency(
     link_whole: [],
     sources: [amalgamated_header],
     include_directories: [include_directories('.')],
+    dependencies: [llvm_dep],
+)
+
+real_dep = declare_dependency(
+    link_whole: [],
+    include_directories: [
+        include_directories('.'),
+        include_directories('src')  # Add this line
+    ],
     dependencies: [llvm_dep],
 )
 
@@ -93,6 +101,18 @@ executable(
     sources: ['tests/jit_runner.cpp'],
     dependencies: [scriptlang_dep],
     include_directories: [include_directories('tests')],
+)
+
+example_exe = executable(
+    'scriptlang_example',
+    sources: ['tools/example.cpp'],
+    dependencies: [real_dep],
+)
+
+example_game_engine = executable(
+    'example_game_engine',
+    sources: ['tools/example_game_engine.cpp'],
+    dependencies: [real_dep],
 )
 # ---------------------------------------------------------------------------
 # Debug dump tool

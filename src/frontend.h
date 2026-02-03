@@ -1,444 +1,786 @@
 // ============================================================
-// ScriptLang Public API
+// ScriptLang Frontend - Enhanced Game Engine Integration
 // ============================================================
-// This is the ONLY header users need to include.
-// 
-// Example usage:
-//     #include "scriptlang_api.h"
-//     
-//     ScriptLang::Runtime runtime;
-//     runtime.initialize();
-//     runtime.compileAndRun("var x = 10; Print(x);");
+// LSP-Ready Design:
+// - Type registry for autocomplete
+// - Component metadata for introspection
+// - Function signatures for hover/completion
+// - Documentation strings attached to bindings
 //
+// Usage:
+//     #define SCRIPTLANG_IMPLEMENTATION
+//     #include "frontend_enhanced.h"
 // ============================================================
 
-#ifndef SCRIPTLANG_API_H
-#define SCRIPTLANG_API_H
+#ifndef SCRIPTLANG_FRONTEND_ENHANCED_H
+#define SCRIPTLANG_FRONTEND_ENHANCED_H
 
-#include <string>
-#include <vector>
+#include <cstdint>
 #include <functional>
 #include <memory>
-#include <cstdint>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <typeinfo>
+#include <unordered_map>
+#include <vector>
 
 namespace ScriptLang {
 
 // ============================================================
-// Forward Declarations (hide implementation details)
+// Forward Declarations
 // ============================================================
 namespace Internal {
-    class RuntimeImpl;
-    class ModuleImpl;
-}
+class RuntimeImpl;
+class ModuleImpl;
+class TypeRegistry;
+} // namespace Internal
 
 // ============================================================
-// Error/Diagnostic Information
-// ============================================================
-enum class DiagnosticLevel {
-    Error,
-    Warning,
-    Note
-};
-
-struct Diagnostic {
-    DiagnosticLevel level;
-    std::string message;
-    int line;
-    int column;
-    
-    Diagnostic(DiagnosticLevel lvl, std::string msg, int l, int c)
-        : level(lvl), message(std::move(msg)), line(l), column(c) {}
-};
-
-// ============================================================
-// Compiled Module Handle
-// ============================================================
-class Module {
-public:
-    Module();
-    ~Module();
-    
-    // Query module state
-    bool isValid() const;
-    const std::vector<Diagnostic>& getDiagnostics() const;
-    bool hasErrors() const;
-    
-    // Get list of exported functions
-    std::vector<std::string> getExportedFunctions() const;
-    
-    // Print LLVM IR (for debugging)
-    std::string getIR() const;
-    
-private:
-    friend class Runtime;
-    std::unique_ptr<Internal::ModuleImpl> impl_;
-};
-
-// ============================================================
-// Script Value - Type-safe wrapper for script values
+// Value - Enhanced with object handles
 // ============================================================
 class Value {
 public:
-    enum class Type {
-        Void,
-        Int32,
-        Int64,
-        Float32,
-        Float64,
-        Bool,
-        String,
-        Null
-    };
-    
-    Value();
-    explicit Value(int32_t v);
-    explicit Value(int64_t v);
-    explicit Value(float v);
-    explicit Value(double v);
-    explicit Value(bool v);
-    explicit Value(const char* v);
-    explicit Value(const std::string& v);
-    
-    Type getType() const { return type_; }
-    
-    // Type checking
-    bool isInt32() const { return type_ == Type::Int32; }
-    bool isInt64() const { return type_ == Type::Int64; }
-    bool isFloat32() const { return type_ == Type::Float32; }
-    bool isFloat64() const { return type_ == Type::Float64; }
-    bool isBool() const { return type_ == Type::Bool; }
-    bool isString() const { return type_ == Type::String; }
-    bool isVoid() const { return type_ == Type::Void; }
-    bool isNull() const { return type_ == Type::Null; }
-    
-    // Value extraction (throws if wrong type)
-    int32_t asInt32() const;
-    int64_t asInt64() const;
-    float asFloat32() const;
-    double asFloat64() const;
-    bool asBool() const;
-    std::string asString() const;
-    
+  enum class Type {
+    Void,
+    Int32,
+    Int64,
+    Float32,
+    Float64,
+    Bool,
+    String,
+    Null,
+    Object // For game objects/components
+  };
+
+  Value() : type_(Type::Void) { data_.i64 = 0; }
+  Value(int32_t v) : type_(Type::Int32) { data_.i32 = v; }
+  Value(int64_t v) : type_(Type::Int64) { data_.i64 = v; }
+  Value(float v) : type_(Type::Float32) { data_.f32 = v; }
+  Value(double v) : type_(Type::Float64) { data_.f64 = v; }
+  Value(bool v) : type_(Type::Bool) { data_.b = v; }
+  Value(const char *v) : type_(Type::String), stringData_(v) {}
+  Value(const std::string &v) : type_(Type::String), stringData_(v) {}
+
+  // Object handle constructor
+  template <typename T>
+  static Value Object(T *ptr, const std::string &typeName = "") {
+    Value v;
+    v.type_ = Type::Object;
+    v.data_.ptr = static_cast<void *>(ptr);
+    v.objectTypeName_ = typeName.empty() ? typeid(T).name() : typeName;
+    return v;
+  }
+
+  static Value Null() {
+    Value v;
+    v.type_ = Type::Null;
+    return v;
+  }
+
+  Type getType() const { return type_; }
+  bool isInt32() const { return type_ == Type::Int32; }
+  bool isInt64() const { return type_ == Type::Int64; }
+  bool isFloat32() const { return type_ == Type::Float32; }
+  bool isFloat64() const { return type_ == Type::Float64; }
+  bool isBool() const { return type_ == Type::Bool; }
+  bool isString() const { return type_ == Type::String; }
+  bool isVoid() const { return type_ == Type::Void; }
+  bool isNull() const { return type_ == Type::Null; }
+  bool isObject() const { return type_ == Type::Object; }
+
+  int32_t asInt32() const {
+    if (type_ != Type::Int32)
+      throw std::runtime_error("Value is not int32");
+    return data_.i32;
+  }
+  int64_t asInt64() const {
+    if (type_ != Type::Int64)
+      throw std::runtime_error("Value is not int64");
+    return data_.i64;
+  }
+  float asFloat32() const {
+    if (type_ != Type::Float32)
+      throw std::runtime_error("Value is not float32");
+    return data_.f32;
+  }
+  double asFloat64() const {
+    if (type_ != Type::Float64)
+      throw std::runtime_error("Value is not float64");
+    return data_.f64;
+  }
+  bool asBool() const {
+    if (type_ != Type::Bool)
+      throw std::runtime_error("Value is not bool");
+    return data_.b;
+  }
+  std::string asString() const {
+    if (type_ != Type::String)
+      throw std::runtime_error("Value is not string");
+    return stringData_;
+  }
+
+  template <typename T> T *asObject() const {
+    if (type_ != Type::Object)
+      throw std::runtime_error("Value is not object");
+    return static_cast<T *>(data_.ptr);
+  }
+
+  void *asObjectPtr() const {
+    if (type_ != Type::Object)
+      throw std::runtime_error("Value is not object");
+    return data_.ptr;
+  }
+
+  const std::string &getObjectTypeName() const { return objectTypeName_; }
+
 private:
-    Type type_;
-    union {
-        int32_t i32;
-        int64_t i64;
-        float f32;
-        double f64;
-        bool b;
-    } data_;
-    std::string stringData_;
+  Type type_;
+  union {
+    int32_t i32;
+    int64_t i64;
+    float f32;
+    double f64;
+    bool b;
+    void *ptr;
+  } data_;
+  std::string stringData_;
+  std::string objectTypeName_; // For LSP type information
 };
 
 // ============================================================
-// Function Binding - Call C++ from scripts
+// Function Metadata (for LSP)
 // ============================================================
-using NativeFunction = std::function<Value(const std::vector<Value>&)>;
+struct ParameterInfo {
+  std::string name;
+  std::string type;
+  std::string defaultValue;
+  std::string description;
+};
 
-// Helper macros for easier function binding
-#define SCRIPTLANG_BIND_FUNC_0(name, func) \
-    runtime.bindFunction(name, [](const std::vector<ScriptLang::Value>&) { \
-        func(); return ScriptLang::Value(); \
-    })
-
-#define SCRIPTLANG_BIND_FUNC_1(name, func) \
-    runtime.bindFunction(name, [](const std::vector<ScriptLang::Value>& args) { \
-        return ScriptLang::Value(func(args[0])); \
-    })
-
-#define SCRIPTLANG_BIND_FUNC_2(name, func) \
-    runtime.bindFunction(name, [](const std::vector<ScriptLang::Value>& args) { \
-        return ScriptLang::Value(func(args[0], args[1])); \
-    })
+struct FunctionMetadata {
+  std::string name;
+  std::string returnType;
+  std::vector<ParameterInfo> parameters;
+  std::string documentation;
+  std::string category; // e.g. "Entity", "Transform", "Physics"
+};
 
 // ============================================================
-// Main Runtime Interface
+// Component/Type Metadata (for LSP)
+// ============================================================
+struct PropertyInfo {
+  std::string name;
+  std::string type;
+  bool readOnly;
+  std::string documentation;
+};
+
+struct MethodInfo {
+  std::string name;
+  std::string returnType;
+  std::vector<ParameterInfo> parameters;
+  std::string documentation;
+};
+
+struct TypeMetadata {
+  std::string name;
+  std::string baseType; // Parent type if any
+  std::vector<PropertyInfo> properties;
+  std::vector<MethodInfo> methods;
+  std::string documentation;
+};
+
+// ============================================================
+// Diagnostic
+// ============================================================
+enum class DiagnosticLevel { Error, Warning, Note };
+
+struct Diagnostic {
+  DiagnosticLevel level;
+  std::string message;
+  int line;
+  int column;
+
+  Diagnostic(DiagnosticLevel lvl, std::string msg, int l = 0, int c = 0)
+      : level(lvl), message(std::move(msg)), line(l), column(c) {}
+};
+
+// ============================================================
+// Module
+// ============================================================
+class Module {
+public:
+  Module();
+  ~Module();
+
+  bool isValid() const;
+  bool hasErrors() const;
+  const std::vector<Diagnostic> &getDiagnostics() const;
+  std::vector<std::string> getExportedFunctions() const;
+  std::string getIR() const;
+
+private:
+  friend class Runtime;
+  std::unique_ptr<Internal::ModuleImpl> impl_;
+};
+
+// ============================================================
+// Function Binding Types
+// ============================================================
+using NativeFunction = std::function<Value(const std::vector<Value> &)>;
+
+// Function thunk for proper calling convention
+template <typename Ret, typename... Args> struct FunctionThunk;
+
+// Specialization for void return
+template <typename... Args> struct FunctionThunk<void, Args...> {
+  template <typename F>
+  static NativeFunction wrap(F &&func, const FunctionMetadata &meta = {}) {
+    return [func = std::forward<F>(func),
+            meta](const std::vector<Value> &args) -> Value {
+      if (args.size() != sizeof...(Args)) {
+        throw std::runtime_error("Wrong number of arguments");
+      }
+      std::apply(
+          func, convertArgs<Args...>(args, std::index_sequence_for<Args...>{}));
+      return Value();
+    };
+  }
+
+private:
+  template <typename... ConvArgs, size_t... Is>
+  static std::tuple<ConvArgs...> convertArgs(const std::vector<Value> &args,
+                                             std::index_sequence<Is...>) {
+    return std::make_tuple(convertArg<ConvArgs>(args[Is])...);
+  }
+
+  template <typename T> static T convertArg(const Value &v) {
+    if constexpr (std::is_same_v<T, int32_t>)
+      return v.asInt32();
+    else if constexpr (std::is_same_v<T, int64_t>)
+      return v.asInt64();
+    else if constexpr (std::is_same_v<T, float>)
+      return v.asFloat32();
+    else if constexpr (std::is_same_v<T, double>)
+      return v.asFloat64();
+    else if constexpr (std::is_same_v<T, bool>)
+      return v.asBool();
+    else if constexpr (std::is_same_v<T, std::string>)
+      return v.asString();
+    else if constexpr (std::is_pointer_v<T>)
+      return v.asObject<std::remove_pointer_t<T>>();
+    else
+      return T{};
+  }
+};
+
+// Specialization for non-void return
+template <typename Ret, typename... Args> struct FunctionThunk {
+  template <typename F>
+  static NativeFunction wrap(F &&func, const FunctionMetadata &meta = {}) {
+    return [func = std::forward<F>(func),
+            meta](const std::vector<Value> &args) -> Value {
+      if (args.size() != sizeof...(Args)) {
+        throw std::runtime_error("Wrong number of arguments");
+      }
+      auto result = std::apply(
+          func, convertArgs<Args...>(args, std::index_sequence_for<Args...>{}));
+      return convertResult<Ret>(result);
+    };
+  }
+
+private:
+  template <typename... ConvArgs, size_t... Is>
+  static std::tuple<ConvArgs...> convertArgs(const std::vector<Value> &args,
+                                             std::index_sequence<Is...>) {
+    return std::make_tuple(convertArg<ConvArgs>(args[Is])...);
+  }
+
+  template <typename T> static T convertArg(const Value &v) {
+    if constexpr (std::is_same_v<T, int32_t>)
+      return v.asInt32();
+    else if constexpr (std::is_same_v<T, int64_t>)
+      return v.asInt64();
+    else if constexpr (std::is_same_v<T, float>)
+      return v.asFloat32();
+    else if constexpr (std::is_same_v<T, double>)
+      return v.asFloat64();
+    else if constexpr (std::is_same_v<T, bool>)
+      return v.asBool();
+    else if constexpr (std::is_same_v<T, std::string>)
+      return v.asString();
+    else if constexpr (std::is_pointer_v<T>)
+      return v.asObject<std::remove_pointer_t<T>>();
+    else
+      return T{};
+  }
+
+  template <typename T> static Value convertResult(const T &result) {
+    if constexpr (std::is_same_v<T, int32_t>)
+      return Value(result);
+    else if constexpr (std::is_same_v<T, int64_t>)
+      return Value(result);
+    else if constexpr (std::is_same_v<T, float>)
+      return Value(result);
+    else if constexpr (std::is_same_v<T, double>)
+      return Value(result);
+    else if constexpr (std::is_same_v<T, bool>)
+      return Value(result);
+    else if constexpr (std::is_same_v<T, std::string>)
+      return Value(result);
+    else if constexpr (std::is_pointer_v<T>)
+      return Value::Object(result);
+    else
+      return Value();
+  }
+};
+
+// ============================================================
+// Component Binder - Easy component exposure
+// ============================================================
+template <typename ComponentType> class ComponentBinder {
+public:
+  ComponentBinder(const std::string &typeName) : typeName_(typeName) {
+    metadata_.name = typeName;
+  }
+
+  // Bind a property (getter/setter)
+  template <typename T>
+  ComponentBinder &property(const std::string &name, T ComponentType::*member,
+                            const std::string &doc = "") {
+    PropertyInfo info;
+    info.name = name;
+    info.type = getTypeName<T>();
+    info.readOnly = false;
+    info.documentation = doc;
+    metadata_.properties.push_back(info);
+
+    // Store getter/setter
+    properties_[name] = {[member](void *obj) -> Value {
+                           auto *comp = static_cast<ComponentType *>(obj);
+                           return Value(comp->*member);
+                         },
+                         [member](void *obj, const Value &val) {
+                           auto *comp = static_cast<ComponentType *>(obj);
+                           comp->*member = convertValue<T>(val);
+                         }};
+
+    return *this;
+  }
+// In ComponentBinder class, add this overload:
+template<typename T>
+ComponentBinder& property(const std::string& name,
+                         std::function<T(ComponentType*)> getter,
+                         std::function<void(ComponentType*, T)> setter,
+                         const std::string& doc = "") {
+    PropertyInfo info;
+    info.name = name;
+    info.type = getTypeName<T>();
+    info.readOnly = false;
+    info.documentation = doc;
+    metadata_.properties.push_back(info);
+    
+    properties_[name] = {
+        [getter](void* obj) -> Value {
+            auto* comp = static_cast<ComponentType*>(obj);
+            return Value(getter(comp));
+        },
+        [setter](void* obj, const Value& val) {
+            auto* comp = static_cast<ComponentType*>(obj);
+            setter(comp, convertValue<T>(val));
+        }
+    };
+    
+    return *this;
+}
+  // Bind a read-only property
+  template <typename T>
+  ComponentBinder &propertyReadOnly(const std::string &name,
+                                    T ComponentType::*member,
+                                    const std::string &doc = "") {
+    PropertyInfo info;
+    info.name = name;
+    info.type = getTypeName<T>();
+    info.readOnly = true;
+    info.documentation = doc;
+    metadata_.properties.push_back(info);
+
+    properties_[name] = {[member](void *obj) -> Value {
+                           auto *comp = static_cast<ComponentType *>(obj);
+                           return Value(comp->*member);
+                         },
+                         nullptr};
+
+    return *this;
+  }
+
+  // Bind a method
+  template <typename Ret, typename... Args>
+  ComponentBinder &method(const std::string &name,
+                          Ret (ComponentType::*func)(Args...),
+                          const std::string &doc = "") {
+    MethodInfo info;
+    info.name = name;
+    info.returnType = getTypeName<Ret>();
+    info.documentation = doc;
+    metadata_.methods.push_back(info);
+
+    methods_[name] = [func](void *obj,
+                            const std::vector<Value> &args) -> Value {
+      auto *comp = static_cast<ComponentType *>(obj);
+      return invokeMethod(comp, func, args, std::index_sequence_for<Args...>{});
+    };
+
+    return *this;
+  }
+  template <typename Ret, typename... Args>
+  ComponentBinder &method(const std::string &name,
+                          Ret (ComponentType::*func)(Args...)
+                              const, // const method
+                          const std::string &doc = "") {
+    MethodInfo info;
+    info.name = name;
+    info.returnType = getTypeName<Ret>();
+    info.documentation = doc;
+    metadata_.methods.push_back(info);
+
+    methods_[name] = [func](void *obj,
+                            const std::vector<Value> &args) -> Value {
+      auto *comp = static_cast<ComponentType *>(obj);
+      return invokeConstMethod(comp, func, args,
+                               std::index_sequence_for<Args...>{});
+    };
+
+    return *this;
+  }
+  const TypeMetadata &getMetadata() const { return metadata_; }
+
+  Value getProperty(void *obj, const std::string &name) const {
+    auto it = properties_.find(name);
+    if (it == properties_.end())
+      throw std::runtime_error("Property not found: " + name);
+    return it->second.getter(obj);
+  }
+
+  void setProperty(void *obj, const std::string &name,
+                   const Value &val) const { // Add const
+    auto it = properties_.find(name);
+    if (it == properties_.end())
+      throw std::runtime_error("Property not found: " + name);
+    if (!it->second.setter)
+      throw std::runtime_error("Property is read-only: " + name);
+    it->second.setter(obj, val);
+  }
+
+  Value callMethod(void *obj, const std::string &name,
+                   const std::vector<Value> &args) const { // Add const
+    auto it = methods_.find(name);
+    if (it == methods_.end())
+      throw std::runtime_error("Method not found: " + name);
+    return it->second(obj, args);
+  }
+
+private:
+  std::string typeName_;
+  TypeMetadata metadata_;
+
+  struct PropertyAccessor {
+    std::function<Value(void *)> getter;
+    std::function<void(void *, const Value &)> setter;
+  };
+
+  std::unordered_map<std::string, PropertyAccessor> properties_;
+  std::unordered_map<std::string,
+                     std::function<Value(void *, const std::vector<Value> &)>>
+      methods_;
+
+  template <typename T> static std::string getTypeName() {
+    if constexpr (std::is_same_v<T, int32_t>)
+      return "int32";
+    else if constexpr (std::is_same_v<T, float>)
+      return "float32";
+    else if constexpr (std::is_same_v<T, double>)
+      return "float64";
+    else if constexpr (std::is_same_v<T, bool>)
+      return "bool";
+    else if constexpr (std::is_same_v<T, std::string>)
+      return "string";
+    else
+      return typeid(T).name();
+  }
+
+  template <typename T> static T convertValue(const Value &val) {
+    if constexpr (std::is_same_v<T, int32_t>)
+      return val.asInt32();
+    else if constexpr (std::is_same_v<T, float>)
+      return val.asFloat32();
+    else if constexpr (std::is_same_v<T, double>)
+      return val.asFloat64();
+    else if constexpr (std::is_same_v<T, bool>)
+      return val.asBool();
+    else if constexpr (std::is_same_v<T, std::string>)
+      return val.asString();
+    else
+      return T{};
+  }
+
+  template <typename Ret, typename... Args, size_t... Is>
+  static Value
+  invokeMethod(ComponentType *obj, Ret (ComponentType::*func)(Args...),
+               const std::vector<Value> &args, std::index_sequence<Is...>) {
+    if constexpr (std::is_void_v<Ret>) {
+      (obj->*func)(convertValue<Args>(args[Is])...);
+      return Value();
+    } else {
+      return Value((obj->*func)(convertValue<Args>(args[Is])...));
+    }
+  }
+};
+
+// ============================================================
+// Runtime - Enhanced with game engine features
 // ============================================================
 class Runtime {
 public:
-    Runtime();
-    ~Runtime();
-    
-    // --------------------------------------------------------
-    // Initialization
-    // --------------------------------------------------------
-    
-    /// Initialize the runtime (must be called first)
-    bool initialize();
-    
-    /// Check if initialized
-    bool isInitialized() const;
-    
-    // --------------------------------------------------------
-    // Compilation
-    // --------------------------------------------------------
-    
-    /// Compile source code to a module
-    Module compile(const std::string& sourceCode);
-    
-    /// Compile from file
-    Module compileFile(const std::string& filepath);
-    
-    /// Quick compile and execute (for REPL/testing)
-    bool compileAndRun(const std::string& sourceCode);
-    
-    // --------------------------------------------------------
-    // Module Management
-    // --------------------------------------------------------
-    
-    /// Load a compiled module into the runtime
-    bool loadModule(const Module& module, const std::string& moduleName = "main");
-    
-    /// Unload a module
-    void unloadModule(const std::string& moduleName);
-    
-    /// Check if module is loaded
-    bool hasModule(const std::string& moduleName) const;
-    
-    // --------------------------------------------------------
-    // Function Calls (C++ → Script)
-    // --------------------------------------------------------
-    
-    /// Call a script function by name
-    Value callFunction(const std::string& functionName);
-    Value callFunction(const std::string& functionName, const std::vector<Value>& args);
-    
-    /// Call a function from a specific module
-    Value callFunction(const std::string& moduleName, 
-                      const std::string& functionName,
-                      const std::vector<Value>& args = {});
-    
-    // --------------------------------------------------------
-    // Function Binding (Script → C++)
-    // --------------------------------------------------------
-    
-    /// Bind a C++ function to be callable from scripts
-    void bindFunction(const std::string& name, NativeFunction func);
-    
-    /// Bind a simple void function
-    void bindFunction(const std::string& name, std::function<void()> func);
-    
-    /// Bind common C functions
-    void bindPrintf();  // Binds printf-style Print() function
-    
-    // --------------------------------------------------------
-    // Variable Access (C++ ↔ Script)
-    // --------------------------------------------------------
-    
-    /// Get a global variable value
-    Value getGlobal(const std::string& name) const;
-    
-    /// Set a global variable value
-    void setGlobal(const std::string& name, const Value& value);
-    
-    /// Check if global exists
-    bool hasGlobal(const std::string& name) const;
-    
-    // --------------------------------------------------------
-    // Memory Management
-    // --------------------------------------------------------
-    
-    /// Set arena sizes (must be called before initialize)
-    void setFrameArenaSize(size_t bytes);       // Default: 1 MB
-    void setPersistentArenaSize(size_t bytes);  // Default: 10 MB
-    
-    /// Reset frame arena (call once per frame in game loop)
-    void resetFrameArena();
-    
-    /// Get memory usage statistics
-    struct MemoryStats {
-        size_t frameArenaUsed;
-        size_t frameArenaCapacity;
-        size_t persistentArenaUsed;
-        size_t persistentArenaCapacity;
-    };
-    MemoryStats getMemoryStats() const;
-    
-    // --------------------------------------------------------
-    // Hot Reload Support
-    // --------------------------------------------------------
-    
-    /// Enable hot reload for a module (watches file for changes)
-    void enableHotReload(const std::string& moduleName, 
-                        const std::string& filepath);
-    
-    /// Disable hot reload
-    void disableHotReload(const std::string& moduleName);
-    
-    /// Set callback for reload events
-    using ReloadCallback = std::function<void(const std::string& moduleName, bool success)>;
-    void setReloadCallback(ReloadCallback callback);
-    
-    /// Manually trigger a reload
-    bool reloadModule(const std::string& moduleName);
-    
-    // --------------------------------------------------------
-    // Debugging & Introspection
-    // --------------------------------------------------------
-    
-    /// Dump LLVM IR for debugging
-    std::string dumpModuleIR(const std::string& moduleName) const;
-    
-    /// Get list of loaded modules
-    std::vector<std::string> getLoadedModules() const;
-    
-    /// Get list of functions in a module
-    std::vector<std::string> getFunctions(const std::string& moduleName) const;
-    
-    /// Get list of global variables in a module
-    std::vector<std::string> getGlobals(const std::string& moduleName) const;
-    
-    /// Enable/disable profiling
-    void enableProfiling(bool enable);
-    
-    /// Get profiling statistics
-    struct ProfilingStats {
-        std::string functionName;
-        uint64_t callCount;
-        double averageTimeMs;
-        double totalTimeMs;
-    };
-    std::vector<ProfilingStats> getProfilingStats() const;
-    void resetProfilingStats();
-    
-    // --------------------------------------------------------
-    // Error Handling
-    // --------------------------------------------------------
-    
-    /// Get last error message
-    std::string getLastError() const;
-    
-    /// Check if there were errors in last operation
-    bool hasErrors() const;
-    
-    /// Get all diagnostics from last operation
-    const std::vector<Diagnostic>& getDiagnostics() const;
-    
-    /// Clear error state
-    void clearErrors();
-    
-    // --------------------------------------------------------
-    // Configuration
-    // --------------------------------------------------------
-    
-    /// Set optimization level (0-3, default: 2)
-    void setOptimizationLevel(int level);
-    
-    /// Enable/disable JIT (vs AOT compilation)
-    void setJITEnabled(bool enabled);
-    
-    /// Set maximum execution time for scripts (milliseconds, 0 = unlimited)
-    void setExecutionTimeout(uint64_t timeoutMs);
-    
+  Runtime();
+  ~Runtime();
+
+  // --------------------------------------------------------
+  // Initialization
+  // --------------------------------------------------------
+  bool initialize();
+  bool isInitialized() const;
+
+  // --------------------------------------------------------
+  // Execution
+  // --------------------------------------------------------
+  bool execute(const std::string &sourceCode);
+  bool executeFile(const std::string &filepath);
+  Module compile(const std::string &sourceCode);
+  Module compileFile(const std::string &filepath);
+  bool loadModule(const Module &module, const std::string &name = "main");
+  void unloadModule(const std::string &moduleName);
+  bool hasModule(const std::string &moduleName) const;
+
+  // --------------------------------------------------------
+  // Function Calls - Enhanced with proper thunking
+  // --------------------------------------------------------
+  Value callFunction(const std::string &functionName);
+  Value callFunction(const std::string &functionName,
+                     const std::vector<Value> &args);
+  Value callFunction(const std::string &moduleName,
+                     const std::string &functionName,
+                     const std::vector<Value> &args = {});
+
+  // --------------------------------------------------------
+  // Function Binding - Enhanced with type-safe wrappers
+  // --------------------------------------------------------
+
+  // Raw binding
+  void bindFunction(const std::string &name, NativeFunction func);
+  void bindFunction(const std::string &name, std::function<void()> func);
+
+  // Type-safe binding with metadata
+  template <typename Ret, typename... Args>
+  void bindFunction(const std::string &name, Ret (*func)(Args...),
+                    const FunctionMetadata &meta = {}) {
+    auto wrapped = FunctionThunk<Ret, Args...>::wrap(func, meta);
+    bindFunction(name, wrapped);
+    registerFunctionMetadata(name, meta);
+  }
+
+  // Lambda binding
+  template <typename F>
+  void bindFunction(const std::string &name, F &&func,
+                    const FunctionMetadata &meta = {}) {
+    bindFunction(name, NativeFunction(std::forward<F>(func)));
+    registerFunctionMetadata(name, meta);
+  }
+
+  void bindPrintf();
+
+  // --------------------------------------------------------
+  // Component/Type Registration (for LSP)
+  // --------------------------------------------------------
+  template <typename ComponentType>
+  ComponentBinder<ComponentType> registerType(const std::string &typeName,
+                                              const std::string &doc = "") {
+    ComponentBinder<ComponentType> binder(typeName);
+    TypeMetadata meta;
+    meta.name = typeName;
+    meta.documentation = doc;
+    registerTypeMetadata(typeName, meta);
+    return binder;
+  }
+
+  void registerTypeMetadata(const std::string &typeName,
+                            const TypeMetadata &meta);
+  void registerFunctionMetadata(const std::string &funcName,
+                                const FunctionMetadata &meta);
+
+  // --------------------------------------------------------
+  // Component Access
+  // --------------------------------------------------------
+  template <typename ComponentType>
+  void bindComponentAccess(const std::string &typeName,
+                           const ComponentBinder<ComponentType> &binder) {
+    // Store binder for property/method access
+    componentBinders_[typeName] = std::make_shared<ComponentBinderBase>(
+        [binder](void *obj, const std::string &prop) {
+          return binder.getProperty(obj, prop);
+        },
+        [binder](void *obj, const std::string &prop, const Value &val) {
+          binder.setProperty(obj, prop, val);
+        },
+        [binder](void *obj, const std::string &method,
+                 const std::vector<Value> &args) {
+          return binder.callMethod(obj, method, args);
+        });
+  }
+
+  // --------------------------------------------------------
+  // LSP Query Interface
+  // --------------------------------------------------------
+  std::vector<FunctionMetadata> getAllFunctions() const;
+  std::vector<TypeMetadata> getAllTypes() const;
+  FunctionMetadata getFunctionMetadata(const std::string &name) const;
+  TypeMetadata getTypeMetadata(const std::string &name) const;
+  std::vector<std::string> getCompletionsAt(const std::string &file, int line,
+                                            int col) const;
+
+  // --------------------------------------------------------
+  // Variable Access
+  // --------------------------------------------------------
+  Value getGlobal(const std::string &name) const;
+  void setGlobal(const std::string &name, const Value &value);
+  bool hasGlobal(const std::string &name) const;
+
+  // --------------------------------------------------------
+  // Memory Management
+  // --------------------------------------------------------
+  void setFrameArenaSize(size_t bytes);
+  void setPersistentArenaSize(size_t bytes);
+  void resetFrameArena();
+
+  struct MemoryStats {
+    size_t frameArenaUsed;
+    size_t frameArenaCapacity;
+    size_t persistentArenaUsed;
+    size_t persistentArenaCapacity;
+  };
+  MemoryStats getMemoryStats() const;
+
+  // --------------------------------------------------------
+  // Hot Reload
+  // --------------------------------------------------------
+  void enableHotReload(const std::string &moduleName,
+                       const std::string &filepath);
+  void disableHotReload(const std::string &moduleName);
+  bool reloadModule(const std::string &moduleName);
+  using ReloadCallback =
+      std::function<void(const std::string &moduleName, bool success)>;
+  void setReloadCallback(ReloadCallback callback);
+
+  // --------------------------------------------------------
+  // Error Handling
+  // --------------------------------------------------------
+  std::string getLastError() const;
+  bool hasErrors() const;
+  const std::vector<Diagnostic> &getDiagnostics() const;
+  void clearErrors();
+
+  // --------------------------------------------------------
+  // Configuration
+  // --------------------------------------------------------
+  void setOptimizationLevel(int level);
+  void setJITEnabled(bool enabled);
+  void setExecutionTimeout(uint64_t timeoutMs);
+
+  // --------------------------------------------------------
+  // Debugging
+  // --------------------------------------------------------
+  std::string dumpModuleIR(const std::string &moduleName) const;
+  std::vector<std::string> getLoadedModules() const;
+  std::vector<std::string> getFunctions(const std::string &moduleName) const;
+  std::vector<std::string> getGlobals(const std::string &moduleName) const;
+
 private:
-    std::unique_ptr<Internal::RuntimeImpl> impl_;
-};
-
-// ============================================================
-// Convenience Functions (for simple use cases)
-// ============================================================
-
-/// Quick execute - compile and run in one call
-inline bool execute(const std::string& sourceCode) {
-    Runtime runtime;
-    runtime.initialize();
-    return runtime.compileAndRun(sourceCode);
-}
-
-/// Quick execute from file
-inline bool executeFile(const std::string& filepath) {
-    Runtime runtime;
-    runtime.initialize();
-    auto module = runtime.compileFile(filepath);
-    if (!module.isValid()) return false;
-    return runtime.loadModule(module);
-}
-
-// ============================================================
-// Version Information
-// ============================================================
-
-struct Version {
-    int major;
-    int minor;
-    int patch;
-    
-    std::string toString() const {
-        return std::to_string(major) + "." + 
-               std::to_string(minor) + "." + 
-               std::to_string(patch);
+  std::unique_ptr<Internal::RuntimeImpl> impl_;
+  template <typename Ret, typename... Args, size_t... Is>
+  static Value invokeConstMethod(const ComponentType *obj, // const obj
+                                 Ret (ComponentType::*func)(Args...) const,
+                                 const std::vector<Value> &args,
+                                 std::index_sequence<Is...>) {
+    if constexpr (std::is_void_v<Ret>) {
+      (obj->*func)(convertValue<Args>(args[Is])...);
+      return Value();
+    } else {
+      return Value((obj->*func)(convertValue<Args>(args[Is])...));
     }
+  }
+  struct ComponentBinderBase {
+    std::function<Value(void *, const std::string &)> getProp;
+    std::function<void(void *, const std::string &, const Value &)> setProp;
+    std::function<Value(void *, const std::string &,
+                        const std::vector<Value> &)>
+        callMethod;
+
+    ComponentBinderBase(auto &&get, auto &&set, auto &&call)
+        : getProp(get), setProp(set), callMethod(call) {}
+  };
+
+  std::unordered_map<std::string, std::shared_ptr<ComponentBinderBase>>
+      componentBinders_;
+  std::unordered_map<std::string, FunctionMetadata> functionMetadata_;
+  std::unordered_map<std::string, TypeMetadata> typeMetadata_;
 };
 
-/// Get ScriptLang version
-Version getVersion();
+// ============================================================
+// Helper Macros
+// ============================================================
 
-/// Get LLVM version used
+// Bind typed function
+#define SCRIPTLANG_BIND(runtime, name, func, ...)                              \
+  runtime.bindFunction(name, func, ##__VA_ARGS__)
+
+// Bind with documentation
+#define SCRIPTLANG_BIND_DOC(runtime, name, func, doc)                          \
+  runtime.bindFunction(name, func,                                             \
+                       ScriptLang::FunctionMetadata{name, "", {}, doc})
+
+// Register component type
+#define SCRIPTLANG_REGISTER_TYPE(runtime, Type, doc)                           \
+  runtime.registerType<Type>(#Type, doc)
+
+// ============================================================
+// Version
+// ============================================================
+struct Version {
+  int major;
+  int minor;
+  int patch;
+  std::string toString() const;
+};
+
+Version getVersion();
 std::string getLLVMVersion();
+
+// ============================================================
+// Convenience
+// ============================================================
+inline bool execute(const std::string &sourceCode) {
+  Runtime runtime;
+  runtime.initialize();
+  return runtime.execute(sourceCode);
+}
+
+inline bool executeFile(const std::string &filepath) {
+  Runtime runtime;
+  runtime.initialize();
+  return runtime.executeFile(filepath);
+}
 
 } // namespace ScriptLang
 
-// ============================================================
-// Example Usage
-// ============================================================
-#if 0
-
-// Example 1: Simple execution
-ScriptLang::execute(R"(
-    var x = 10;
-    var y = 20;
-    Print("Sum:", x + y);
-)");
-
-// Example 2: Full control
-ScriptLang::Runtime runtime;
-runtime.initialize();
-
-// Bind C++ functions
-runtime.bindFunction("GetPlayerHealth", []() { return 100; });
-runtime.bindFunction("SetPlayerHealth", [](int health) { 
-    playerHealth = health; 
-});
-
-// Compile and load
-auto module = runtime.compile(R"(
-    var health = GetPlayerHealth();
-    Print("Health:", health);
-    SetPlayerHealth(50);
-)");
-
-if (module.isValid()) {
-    runtime.loadModule(module);
-}
-
-// Call script functions
-auto result = runtime.callFunction("calculateDamage", {
-    ScriptLang::Value(10),  // base damage
-    ScriptLang::Value(1.5)  // multiplier
-});
-std::cout << "Damage: " << result.asInt32() << std::endl;
-
-// Example 3: Hot reload
-runtime.enableHotReload("gameplay", "scripts/gameplay.sl");
-runtime.setReloadCallback([](const std::string& name, bool success) {
-    if (success) {
-        std::cout << "Reloaded: " << name << std::endl;
-    }
-});
-
-// Game loop
-while (running) {
-    runtime.resetFrameArena();  // Clear frame allocations
-    
-    // Call update function
-    runtime.callFunction("gameplay", "Update", {
-        ScriptLang::Value(deltaTime)
-    });
-    
-    render();
-}
-
-#endif
-
-#endif // SCRIPTLANG_API_H
+#endif // SCRIPTLANG_FRONTEND_ENHANCED_H
