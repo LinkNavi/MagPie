@@ -12,7 +12,7 @@
 #include <chrono>
 #include <thread>
 #include <atomic>
-
+#include <fstream>
 #ifdef _WIN32
     #include <windows.h>
 #else
@@ -323,7 +323,9 @@ private:
         TypeContext types;
         SymbolTable symbols;
         
-        bool success = jit_.reloadModule(moduleName, sourceCode, types, symbols);
+     
+bool success = jit_.reloadModule(moduleName, sourceCode);
+
         
         if (success) {
             // Restore state

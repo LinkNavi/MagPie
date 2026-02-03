@@ -96,7 +96,7 @@ public:
         
         // Set up data layout and target triple
         module->setDataLayout(jit_->getDataLayout());
-        module->setTargetTriple(jit_->getTargetTriple().str());
+      module->setTargetTriple(jit_->getTargetTriple());
         
         // Declare external functions (engine API)
         llvm::FunctionType* printIntType = llvm::FunctionType::get(
@@ -218,8 +218,7 @@ public:
         llvm::IRBuilder<> builder(*context);
         
         module->setDataLayout(jit_->getDataLayout());
-        module->setTargetTriple(jit_->getTargetTriple().str());
-        
+       module->setTargetTriple(jit_->getTargetTriple());        
         // Declare ScriptPrintInt
         llvm::FunctionType* printIntType = llvm::FunctionType::get(
             builder.getVoidTy(),
@@ -307,7 +306,7 @@ public:
         llvm::IRBuilder<> builder(*context);
         
         module->setDataLayout(jit_->getDataLayout());
-        module->setTargetTriple(jit_->getTargetTriple().str());
+      module->setTargetTriple(jit_->getTargetTriple());
         
         // Declare ScriptPrintInt
         llvm::FunctionType* printIntType = llvm::FunctionType::get(

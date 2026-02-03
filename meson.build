@@ -45,7 +45,8 @@ source_headers = files(
     'src/arena.h',
     'src/codegen.h',
     'src/jit_compiler.h',
-    'src/hot_reload.h'
+    'src/hot_reload.h',
+    'src/frontend.h'
 )
 
 amalgamated_header = custom_target(
