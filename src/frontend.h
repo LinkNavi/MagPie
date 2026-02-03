@@ -368,6 +368,35 @@ public:
 
     return *this;
   }
+
+template<typename Getter, typename Setter>
+ComponentBinder& property(const std::string& name,
+                         Getter&& getter,
+                         Setter&& setter,
+                         const std::string& doc = "") {
+    using T = std::invoke_result_t<Getter, ComponentType*>;
+    
+    PropertyInfo info;
+    info.name = name;
+    info.type = getTypeName<T>();
+    info.readOnly = false;
+    info.documentation = doc;
+    metadata_.properties.push_back(info);
+    
+    properties_[name] = {
+        [getter = std::forward<Getter>(getter)](void* obj) -> Value {
+            auto* comp = static_cast<ComponentType*>(obj);
+            return Value(getter(comp));
+        },
+        [setter = std::forward<Setter>(setter)](void* obj, const Value& val) {
+            auto* comp = static_cast<ComponentType*>(obj);
+            setter(comp, convertValue<T>(val));
+        }
+    };
+    
+    return *this;
+}
+
 // In ComponentBinder class, add this overload:
 template<typename T>
 ComponentBinder& property(const std::string& name,
@@ -708,7 +737,7 @@ public:
 
 private:
   std::unique_ptr<Internal::RuntimeImpl> impl_;
-  template <typename Ret, typename... Args, size_t... Is>
+  template <typename ComponentType, typename Ret, typename... Args, size_t... Is>
   static Value invokeConstMethod(const ComponentType *obj, // const obj
                                  Ret (ComponentType::*func)(Args...) const,
                                  const std::vector<Value> &args,
@@ -727,7 +756,8 @@ private:
                         const std::vector<Value> &)>
         callMethod;
 
-    ComponentBinderBase(auto &&get, auto &&set, auto &&call)
+template<typename G, typename S, typename C>
+    ComponentBinderBase(G &&get, S &&set, C &&call)
         : getProp(get), setProp(set), callMethod(call) {}
   };
 
