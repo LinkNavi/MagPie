@@ -1,587 +1,857 @@
-# ScriptLang LLVM Compilation Roadmap
+# LLVM API Reference Guide
 
-## Goal: Maximum Performance Game Scripting Language
+This is a practical guide to the LLVM C++ API for building compilers.
 
-This roadmap will take you from your current AST parser to a fully optimizing, 
-native-code-generating compiler suitable for AAA game engines.
-
----
-
-## Architecture Overview
-
-```
-Source Code (.mp)
-    ↓
-Lexer → Tokens
-    ↓
-Parser → AST (✅ YOU ARE HERE)
-    ↓
-Semantic Analysis → Typed AST
-    ↓
-LLVM IR Generation
-    ↓
-LLVM Optimization Passes
-    ↓
-Machine Code (x86/ARM/etc.)
-```
+## Table of Contents
+1. [Core Concepts](#core-concepts)
+2. [Context & Module](#context--module)
+3. [Types](#types)
+4. [Values & Instructions](#values--instructions)
+5. [Functions](#functions)
+6. [Basic Blocks & Control Flow](#basic-blocks--control-flow)
+7. [IRBuilder](#irbuilder)
+8. [Memory Operations](#memory-operations)
+9. [Common Patterns](#common-patterns)
+10. [Debugging & Verification](#debugging--verification)
 
 ---
 
-## Phase 1: Semantic Analysis & Type System (2-4 weeks)
+## Core Concepts
 
-Before generating code, you need to:
+### The LLVM Type Hierarchy
 
-### 1.1 Type Checking
-```cpp
-class TypeChecker {
-    // Visit AST and assign types to all expressions
-    TypePtr inferType(const Expression* expr);
-    void checkType(const Expression* expr, TypePtr expected);
-    
-    // Build symbol tables
-    SymbolTable globals;
-    SymbolTable currentScope;
-};
+```
+Value (base class for all IR values)
+├── Constant (compile-time constants)
+│   ├── ConstantInt (42, true, false)
+│   ├── ConstantFP (3.14)
+│   ├── ConstantPointerNull (nullptr)
+│   └── GlobalValue (globals, functions)
+├── Instruction (runtime operations)
+│   ├── BinaryOperator (add, mul, etc.)
+│   ├── CallInst (function calls)
+│   ├── LoadInst (load from memory)
+│   ├── StoreInst (store to memory)
+│   ├── AllocaInst (stack allocation)
+│   └── ...
+├── Argument (function parameters)
+└── BasicBlock (sequence of instructions)
 ```
 
-**Key types to support:**
-- Primitives: int8, int16, int32, int64, float32, float64, bool
-- Compound: string, arrays, classes
-- Functions: (int32, int32) -> int32
+### SSA Form (Static Single Assignment)
 
-### 1.2 Symbol Resolution
-```cpp
-class SymbolResolver {
-    // Resolve all identifiers to their declarations
-    void resolveProgram(Program* ast);
-    
-    // Bind each Identifier node to its VarDecl/FunctionDecl
-    std::unordered_map<IdentifierExpr*, Declaration*> bindings;
-};
+Every value is assigned exactly once:
+```llvm
+; BAD (not valid LLVM IR):
+%x = add i32 1, 2
+%x = add i32 %x, 3    ; ERROR: reassignment
+
+; GOOD (use phi for control flow merges):
+entry:
+  br i1 %cond, label %then, label %else
+then:
+  %x.then = add i32 1, 2
+  br label %merge
+else:
+  %x.else = add i32 3, 4
+  br label %merge
+merge:
+  %x = phi i32 [ %x.then, %then ], [ %x.else, %else ]
 ```
-
-### 1.3 Optimization-Friendly IR (Optional but recommended)
-```cpp
-// Convert AST to a simpler IR before LLVM
-// This makes optimizations easier to write
-class IRBuilder {
-    std::vector<BasicBlock> blocks;
-    
-    // SSA form - each variable assigned exactly once
-    void buildSSA(const Statement* stmt);
-};
-```
-
-**Files to create:**
-- `src/types.h` - Type system
-- `src/symbol_table.h` - Scoped symbol tables
-- `src/type_checker.cpp` - Type inference & checking
-- `src/semantic_analyzer.cpp` - Full semantic pass
 
 ---
 
-## Phase 2: LLVM Integration (2-3 weeks)
+## Context & Module
 
-### 2.1 Setup LLVM (1 day)
+### LLVMContext
 
-**Install LLVM 18 (latest stable):**
-```bash
-# Ubuntu/Debian
-sudo apt install llvm-18 llvm-18-dev
-
-# macOS
-brew install llvm@18
-
-# Or build from source for maximum control
-git clone https://github.com/llvm/llvm-project.git
-cd llvm-project
-mkdir build && cd build
-cmake -DLLVM_ENABLE_PROJECTS=clang -DCMAKE_BUILD_TYPE=Release ../llvm
-make -j$(nproc)
-```
-
-**Update meson.build:**
-```meson
-llvm_dep = dependency('llvm', version: '>=18.0')
-
-executable('scriptlang_compiler',
-    sources: ['src/main.cpp', 'src/codegen.cpp', ...],
-    dependencies: [scriptlang_dep, llvm_dep]
-)
-```
-
-### 2.2 Basic LLVM IR Generator (1-2 weeks)
+The context owns global state like type uniquing. **Always create one context per thread.**
 
 ```cpp
-// src/llvm_codegen.h
 #include <llvm/IR/LLVMContext.h>
+
+llvm::LLVMContext context;
+```
+
+- Manages type uniquing (e.g., only one `i32` type exists)
+- Not thread-safe - one per thread
+- Destroyed automatically when out of scope
+
+### Module
+
+A module is a compilation unit - contains functions, globals, metadata.
+
+```cpp
 #include <llvm/IR/Module.h>
+
+auto module = std::make_unique<llvm::Module>("my_module", context);
+
+// Set target triple (what architecture we're compiling for)
+module->setTargetTriple("x86_64-pc-linux-gnu");
+
+// Set data layout (how types are laid out in memory)
+module->setDataLayout("e-m:e-i64:64-f80:128-n8:16:32:64-S128");
+
+// Print module to stdout
+module->print(llvm::outs(), nullptr);
+
+// Get a function by name
+llvm::Function* func = module->getFunction("myFunction");
+
+// Get a global variable by name
+llvm::GlobalVariable* global = module->getNamedGlobal("myGlobal");
+```
+
+---
+
+## Types
+
+### Primitive Types
+
+```cpp
+#include <llvm/IR/Type.h>
+#include <llvm/IR/DerivedTypes.h>
+
+llvm::LLVMContext context;
+
+// Integer types
+llvm::Type* i1  = llvm::Type::getInt1Ty(context);   // bool
+llvm::Type* i8  = llvm::Type::getInt8Ty(context);   // byte/char
+llvm::Type* i16 = llvm::Type::getInt16Ty(context);  // short
+llvm::Type* i32 = llvm::Type::getInt32Ty(context);  // int
+llvm::Type* i64 = llvm::Type::getInt64Ty(context);  // long
+
+// Floating-point types
+llvm::Type* f16  = llvm::Type::getHalfTy(context);     // half precision
+llvm::Type* f32  = llvm::Type::getFloatTy(context);    // float
+llvm::Type* f64  = llvm::Type::getDoubleTy(context);   // double
+llvm::Type* f128 = llvm::Type::getFP128Ty(context);    // quad precision
+
+// Void (for function returns)
+llvm::Type* voidTy = llvm::Type::getVoidTy(context);
+
+// Pointer (opaque pointers in LLVM 15+)
+llvm::Type* ptrTy = llvm::PointerType::get(context, 0);  // ptr
+```
+
+### Aggregate Types
+
+```cpp
+// Array: [10 x i32]
+llvm::Type* arrayTy = llvm::ArrayType::get(
+    llvm::Type::getInt32Ty(context),
+    10  // number of elements
+);
+
+// Struct: { i32, float, i8* }
+std::vector<llvm::Type*> fields = {
+    llvm::Type::getInt32Ty(context),
+    llvm::Type::getFloatTy(context),
+    llvm::PointerType::get(context, 0)
+};
+llvm::StructType* structTy = llvm::StructType::create(context, fields, "MyStruct");
+
+// Or anonymous struct:
+llvm::StructType* anonStruct = llvm::StructType::get(context, fields);
+
+// Vector: <4 x float> (SIMD)
+llvm::Type* vecTy = llvm::VectorType::get(
+    llvm::Type::getFloatTy(context),
+    llvm::ElementCount::getFixed(4),
+    false  // not scalable
+);
+```
+
+### Function Types
+
+```cpp
+// int32 add(int32 a, int32 b)
+std::vector<llvm::Type*> paramTypes = {
+    llvm::Type::getInt32Ty(context),
+    llvm::Type::getInt32Ty(context)
+};
+
+llvm::FunctionType* funcTy = llvm::FunctionType::get(
+    llvm::Type::getInt32Ty(context),  // return type
+    paramTypes,                       // parameter types
+    false                             // is variadic?
+);
+
+// Variadic: int printf(char* fmt, ...)
+llvm::FunctionType* printfTy = llvm::FunctionType::get(
+    llvm::Type::getInt32Ty(context),
+    {llvm::PointerType::get(context, 0)},
+    true  // variadic
+);
+```
+
+---
+
+## Values & Instructions
+
+### Constants
+
+```cpp
+#include <llvm/IR/Constants.h>
+
+// Integer constants
+llvm::Value* zero = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0);
+llvm::Value* fortytwo = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 42);
+llvm::Value* trueBool = llvm::ConstantInt::getTrue(context);
+llvm::Value* falseBool = llvm::ConstantInt::getFalse(context);
+
+// Floating-point constants
+llvm::Value* pi = llvm::ConstantFP::get(llvm::Type::getDoubleTy(context), 3.14159);
+
+// Null pointer
+llvm::Value* nullPtr = llvm::ConstantPointerNull::get(
+    llvm::PointerType::get(context, 0)
+);
+
+// Struct constant: { 42, 3.14 }
+std::vector<llvm::Constant*> structFields = {
+    llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 42),
+    llvm::ConstantFP::get(llvm::Type::getFloatTy(context), 3.14)
+};
+llvm::Constant* structConst = llvm::ConstantStruct::get(structTy, structFields);
+
+// Array constant: [1, 2, 3]
+std::vector<llvm::Constant*> arrayElements = {
+    llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1),
+    llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 2),
+    llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 3)
+};
+llvm::Constant* arrayConst = llvm::ConstantArray::get(arrayTy, arrayElements);
+
+// Zero initializer (for any type)
+llvm::Constant* zeroInit = llvm::Constant::getNullValue(myType);
+```
+
+### Working with Values
+
+```cpp
+llvm::Value* val = /* ... */;
+
+// Get the type
+llvm::Type* type = val->getType();
+
+// Set the name (for debugging)
+val->setName("myValue");
+
+// Check what kind of value it is
+if (llvm::isa<llvm::Constant>(val)) {
+    // It's a constant
+}
+if (auto* inst = llvm::dyn_cast<llvm::Instruction>(val)) {
+    // It's an instruction
+    llvm::BasicBlock* bb = inst->getParent();
+}
+if (auto* func = llvm::dyn_cast<llvm::Function>(val)) {
+    // It's a function
+}
+
+// Replace all uses of one value with another
+oldVal->replaceAllUsesWith(newVal);
+```
+
+---
+
+## Functions
+
+### Creating Functions
+
+```cpp
+#include <llvm/IR/Function.h>
+
+// Create function type: int32 add(int32, int32)
+llvm::FunctionType* funcTy = llvm::FunctionType::get(
+    llvm::Type::getInt32Ty(context),
+    {llvm::Type::getInt32Ty(context), llvm::Type::getInt32Ty(context)},
+    false
+);
+
+// Create the function
+llvm::Function* func = llvm::Function::Create(
+    funcTy,
+    llvm::Function::ExternalLinkage,  // linkage type
+    "add",                            // name
+    module.get()                      // parent module
+);
+
+// Name the parameters
+auto args = func->arg_begin();
+llvm::Argument* a = args++;
+a->setName("a");
+llvm::Argument* b = args++;
+b->setName("b");
+```
+
+### Linkage Types
+
+```cpp
+// ExternalLinkage - visible outside module, can be called from other modules
+llvm::Function::ExternalLinkage
+
+// InternalLinkage - only visible within module (static in C)
+llvm::Function::InternalLinkage
+
+// PrivateLinkage - like internal, but may be optimized more aggressively
+llvm::Function::PrivateLinkage
+
+// WeakAnyLinkage - weak symbol (linker picks one if multiple definitions)
+llvm::Function::WeakAnyLinkage
+
+// ExternalWeakLinkage - weak external symbol
+llvm::Function::ExternalWeakLinkage
+```
+
+### Function Attributes
+
+```cpp
+#include <llvm/IR/Attributes.h>
+
+// Mark function as not returning (like [[noreturn]])
+func->addFnAttr(llvm::Attribute::NoReturn);
+
+// Mark function as readonly (doesn't modify memory)
+func->addFnAttr(llvm::Attribute::ReadOnly);
+
+// Mark function as not throwing exceptions
+func->addFnAttr(llvm::Attribute::NoUnwind);
+
+// Mark function for inlining
+func->addFnAttr(llvm::Attribute::AlwaysInline);
+
+// Mark parameter attributes
+func->addParamAttr(0, llvm::Attribute::NoAlias);  // first param is noalias
+func->addParamAttr(1, llvm::Attribute::NonNull);  // second param is nonnull
+```
+
+### Working with Functions
+
+```cpp
+// Iterate over basic blocks
+for (llvm::BasicBlock& bb : *func) {
+    // Process basic block
+}
+
+// Iterate over instructions
+for (llvm::BasicBlock& bb : *func) {
+    for (llvm::Instruction& inst : bb) {
+        // Process instruction
+    }
+}
+
+// Get entry block
+llvm::BasicBlock* entry = &func->getEntryBlock();
+
+// Check if function is declaration (no body)
+if (func->isDeclaration()) {
+    // It's just a declaration
+}
+
+// Delete function
+func->eraseFromParent();
+```
+
+---
+
+## Basic Blocks & Control Flow
+
+### Creating Basic Blocks
+
+```cpp
+#include <llvm/IR/BasicBlock.h>
+
+llvm::Function* func = /* ... */;
+
+// Create basic blocks
+llvm::BasicBlock* entry = llvm::BasicBlock::Create(context, "entry", func);
+llvm::BasicBlock* thenBB = llvm::BasicBlock::Create(context, "then", func);
+llvm::BasicBlock* elseBB = llvm::BasicBlock::Create(context, "else", func);
+llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(context, "merge", func);
+```
+
+### Terminators (Control Flow)
+
+Every basic block must end with exactly one terminator instruction.
+
+```cpp
 #include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/Value.h>
 
-class LLVMCodeGen {
-public:
-    LLVMCodeGen();
-    
-    // Generate LLVM IR from AST
-    std::unique_ptr<llvm::Module> compile(const Program& ast);
-    
-private:
-    llvm::LLVMContext context;
-    llvm::IRBuilder<> builder;
-    std::unique_ptr<llvm::Module> module;
-    
-    // Symbol table mapping variables to LLVM values
-    std::unordered_map<std::string, llvm::Value*> namedValues;
-    
-    // Code generation for different node types
-    llvm::Value* codegen(const Expression* expr);
-    llvm::Value* codegen(const Statement* stmt);
-    llvm::Function* codegen(const FunctionDecl* func);
-    
-    // Type conversion
-    llvm::Type* getLLVMType(const TypeAnnotation* type);
-};
+llvm::IRBuilder<> builder(context);
+builder.SetInsertPoint(someBB);
+
+// Return statement
+builder.CreateRet(returnValue);      // return value
+builder.CreateRetVoid();             // return (void)
+
+// Unconditional branch
+builder.CreateBr(targetBB);          // goto targetBB
+
+// Conditional branch
+builder.CreateCondBr(
+    condition,   // i1 value
+    thenBB,      // if true
+    elseBB       // if false
+);
+
+// Switch statement
+llvm::SwitchInst* switchInst = builder.CreateSwitch(
+    value,      // value to switch on
+    defaultBB,  // default case
+    3           // number of cases (hint)
+);
+switchInst->addCase(
+    llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1),
+    case1BB
+);
+switchInst->addCase(
+    llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 2),
+    case2BB
+);
+
+// Unreachable (for impossible cases)
+builder.CreateUnreachable();
 ```
 
-**Example implementation:**
+### Phi Nodes (for SSA)
+
+Phi nodes merge values from different predecessors.
+
 ```cpp
-llvm::Value* LLVMCodeGen::codegen(const Expression* expr) {
-    // Literal
-    if (auto* lit = dynamic_cast<const LiteralExpr*>(expr)) {
-        if (lit->kind == LiteralKind::Integer) {
-            return llvm::ConstantInt::get(context, 
-                llvm::APInt(32, std::stoi(lit->value)));
-        }
-        // ... other literals
+// Example: x = cond ? 10 : 20
+builder.SetInsertPoint(mergeBB);
+
+llvm::PHINode* phi = builder.CreatePHI(
+    llvm::Type::getInt32Ty(context),
+    2,          // number of incoming values
+    "x"
+);
+
+phi->addIncoming(
+    llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 10),
+    thenBB
+);
+phi->addIncoming(
+    llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 20),
+    elseBB
+);
+```
+
+---
+
+## IRBuilder
+
+IRBuilder is the main API for creating instructions. It tracks the current insertion point.
+
+```cpp
+#include <llvm/IR/IRBuilder.h>
+
+llvm::IRBuilder<> builder(context);
+
+// Set where to insert instructions
+builder.SetInsertPoint(basicBlock);
+
+// Or insert at specific position
+builder.SetInsertPoint(basicBlock, iterator);
+```
+
+### Arithmetic Operations
+
+```cpp
+// Integer arithmetic
+llvm::Value* add = builder.CreateAdd(lhs, rhs, "add");
+llvm::Value* sub = builder.CreateSub(lhs, rhs, "sub");
+llvm::Value* mul = builder.CreateMul(lhs, rhs, "mul");
+llvm::Value* sdiv = builder.CreateSDiv(lhs, rhs, "div");  // signed
+llvm::Value* udiv = builder.CreateUDiv(lhs, rhs, "div");  // unsigned
+llvm::Value* srem = builder.CreateSRem(lhs, rhs, "rem");  // signed modulo
+llvm::Value* urem = builder.CreateURem(lhs, rhs, "rem");  // unsigned modulo
+
+// Floating-point arithmetic
+llvm::Value* fadd = builder.CreateFAdd(lhs, rhs, "add");
+llvm::Value* fsub = builder.CreateFSub(lhs, rhs, "sub");
+llvm::Value* fmul = builder.CreateFMul(lhs, rhs, "mul");
+llvm::Value* fdiv = builder.CreateFDiv(lhs, rhs, "div");
+llvm::Value* frem = builder.CreateFRem(lhs, rhs, "rem");
+
+// Negation
+llvm::Value* neg = builder.CreateNeg(val, "neg");
+llvm::Value* fneg = builder.CreateFNeg(val, "neg");
+
+// Bitwise operations
+llvm::Value* andVal = builder.CreateAnd(lhs, rhs, "and");
+llvm::Value* orVal = builder.CreateOr(lhs, rhs, "or");
+llvm::Value* xorVal = builder.CreateXor(lhs, rhs, "xor");
+llvm::Value* notVal = builder.CreateNot(val, "not");
+
+// Shifts
+llvm::Value* shl = builder.CreateShl(val, amount, "shl");   // <<
+llvm::Value* lshr = builder.CreateLShr(val, amount, "lshr"); // >> (logical)
+llvm::Value* ashr = builder.CreateAShr(val, amount, "ashr"); // >> (arithmetic)
+```
+
+### Comparisons
+
+```cpp
+// Integer comparisons (returns i1)
+llvm::Value* eq = builder.CreateICmpEQ(lhs, rhs, "eq");    // ==
+llvm::Value* ne = builder.CreateICmpNE(lhs, rhs, "ne");    // !=
+llvm::Value* slt = builder.CreateICmpSLT(lhs, rhs, "lt");  // < (signed)
+llvm::Value* ult = builder.CreateICmpULT(lhs, rhs, "lt");  // < (unsigned)
+llvm::Value* sle = builder.CreateICmpSLE(lhs, rhs, "le");  // <= (signed)
+llvm::Value* ule = builder.CreateICmpULE(lhs, rhs, "le");  // <= (unsigned)
+llvm::Value* sgt = builder.CreateICmpSGT(lhs, rhs, "gt");  // > (signed)
+llvm::Value* ugt = builder.CreateICmpUGT(lhs, rhs, "gt");  // > (unsigned)
+llvm::Value* sge = builder.CreateICmpSGE(lhs, rhs, "ge");  // >= (signed)
+llvm::Value* uge = builder.CreateICmpUGE(lhs, rhs, "ge");  // >= (unsigned)
+
+// Floating-point comparisons
+llvm::Value* oeq = builder.CreateFCmpOEQ(lhs, rhs, "eq");  // ordered ==
+llvm::Value* olt = builder.CreateFCmpOLT(lhs, rhs, "lt");  // ordered <
+llvm::Value* ole = builder.CreateFCmpOLE(lhs, rhs, "le");  // ordered <=
+llvm::Value* ogt = builder.CreateFCmpOGT(lhs, rhs, "gt");  // ordered >
+llvm::Value* oge = builder.CreateFCmpOGE(lhs, rhs, "ge");  // ordered >=
+llvm::Value* one = builder.CreateFCmpONE(lhs, rhs, "ne");  // ordered !=
+
+// Unordered versions (true if either operand is NaN)
+llvm::Value* ueq = builder.CreateFCmpUEQ(lhs, rhs, "eq");
+```
+
+### Type Conversions
+
+```cpp
+// Integer conversions
+llvm::Value* trunc = builder.CreateTrunc(val, targetType, "trunc");     // i64 -> i32
+llvm::Value* zext = builder.CreateZExt(val, targetType, "zext");        // i32 -> i64 (zero extend)
+llvm::Value* sext = builder.CreateSExt(val, targetType, "sext");        // i32 -> i64 (sign extend)
+
+// Float conversions
+llvm::Value* fptrunc = builder.CreateFPTrunc(val, targetType, "trunc"); // double -> float
+llvm::Value* fpext = builder.CreateFPExt(val, targetType, "ext");       // float -> double
+
+// Int <-> Float
+llvm::Value* sitofp = builder.CreateSIToFP(val, targetType, "conv");    // signed int -> float
+llvm::Value* uitofp = builder.CreateUIToFP(val, targetType, "conv");    // unsigned int -> float
+llvm::Value* fptosi = builder.CreateFPToSI(val, targetType, "conv");    // float -> signed int
+llvm::Value* fptoui = builder.CreateFPToUI(val, targetType, "conv");    // float -> unsigned int
+
+// Pointer conversions
+llvm::Value* ptrtoint = builder.CreatePtrToInt(val, intType, "conv");   // ptr -> int
+llvm::Value* inttoptr = builder.CreateIntToPtr(val, ptrType, "conv");   // int -> ptr
+
+// Bitcast (reinterpret bits)
+llvm::Value* bitcast = builder.CreateBitCast(val, targetType, "cast");
+```
+
+---
+
+## Memory Operations
+
+### Stack Allocation (alloca)
+
+Allocates memory on the stack (like C `int x;`).
+
+```cpp
+// Allocate one i32 on the stack
+llvm::AllocaInst* alloca = builder.CreateAlloca(
+    llvm::Type::getInt32Ty(context),
+    nullptr,    // array size (nullptr = single value)
+    "x"
+);
+
+// Allocate array of 10 i32s
+llvm::Value* arraySize = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 10);
+llvm::AllocaInst* arrayAlloca = builder.CreateAlloca(
+    llvm::Type::getInt32Ty(context),
+    arraySize,
+    "arr"
+);
+
+// Best practice: Create allocas at the start of function entry block
+llvm::IRBuilder<> tmpBuilder(&func->getEntryBlock(), func->getEntryBlock().begin());
+llvm::AllocaInst* alloca = tmpBuilder.CreateAlloca(type, nullptr, name);
+```
+
+### Load & Store
+
+```cpp
+// Store value to memory
+builder.CreateStore(value, pointerToMemory);
+
+// Load value from memory
+llvm::Value* loaded = builder.CreateLoad(
+    elementType,          // type of value being loaded
+    pointerToMemory,
+    "loaded"
+);
+
+// Volatile load/store (for memory-mapped I/O)
+builder.CreateStore(value, ptr, /*isVolatile=*/true);
+llvm::Value* vol = builder.CreateLoad(type, ptr, /*isVolatile=*/true);
+
+// Aligned load/store
+llvm::LoadInst* load = builder.CreateLoad(type, ptr);
+load->setAlignment(llvm::Align(4));  // 4-byte aligned
+
+llvm::StoreInst* store = builder.CreateStore(val, ptr);
+store->setAlignment(llvm::Align(4));
+```
+
+### GetElementPtr (GEP)
+
+GEP calculates addresses into aggregates (arrays, structs).
+
+```cpp
+// Array indexing: arr[i]
+llvm::Value* elemPtr = builder.CreateGEP(
+    elementType,        // type of array element
+    arrayPtr,          // pointer to array
+    {index},           // indices
+    "elemPtr"
+);
+
+// Struct field access: struct.field1
+llvm::Value* fieldPtr = builder.CreateStructGEP(
+    structType,        // struct type
+    structPtr,         // pointer to struct
+    1,                 // field index
+    "fieldPtr"
+);
+
+// Multi-dimensional: arr[i][j]
+llvm::Value* elemPtr = builder.CreateGEP(
+    arrayType,
+    arrayPtr,
+    {indexI, indexJ}
+);
+
+// Convenience: In-bounds GEP (enables more optimizations)
+llvm::Value* ptr = builder.CreateInBoundsGEP(type, basePtr, {indices});
+```
+
+---
+
+## Common Patterns
+
+### If-Then-Else
+
+```cpp
+void generateIf(llvm::Value* cond, std::function<void()> thenCode,
+                std::function<void()> elseCode) {
+    llvm::Function* func = builder.GetInsertBlock()->getParent();
+    
+    llvm::BasicBlock* thenBB = llvm::BasicBlock::Create(context, "then", func);
+    llvm::BasicBlock* elseBB = llvm::BasicBlock::Create(context, "else", func);
+    llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(context, "merge", func);
+    
+    builder.CreateCondBr(cond, thenBB, elseBB);
+    
+    // Then branch
+    builder.SetInsertPoint(thenBB);
+    thenCode();
+    if (!builder.GetInsertBlock()->getTerminator()) {
+        builder.CreateBr(mergeBB);
     }
     
-    // Binary operation
-    if (auto* bin = dynamic_cast<const BinaryExpr*>(expr)) {
-        llvm::Value* L = codegen(bin->left.get());
-        llvm::Value* R = codegen(bin->right.get());
-        
-        switch (bin->op) {
-            case BinaryOp::Add:
-                return builder.CreateAdd(L, R, "addtmp");
-            case BinaryOp::Mul:
-                return builder.CreateMul(L, R, "multmp");
-            // ... other ops
-        }
+    // Else branch
+    builder.SetInsertPoint(elseBB);
+    elseCode();
+    if (!builder.GetInsertBlock()->getTerminator()) {
+        builder.CreateBr(mergeBB);
     }
     
-    // Variable reference
-    if (auto* id = dynamic_cast<const IdentifierExpr*>(expr)) {
-        llvm::Value* V = namedValues[id->name];
-        return builder.CreateLoad(V->getType(), V, id->name);
-    }
-    
-    // ... other expressions
+    // Merge
+    builder.SetInsertPoint(mergeBB);
 }
 ```
 
-### 2.3 Generate Object Files (2 days)
+### While Loop
 
 ```cpp
-// src/compiler.cpp
-#include <llvm/Target/TargetMachine.h>
-#include <llvm/MC/TargetRegistry.h>
-#include <llvm/Support/FileSystem.h>
-#include <llvm/Support/TargetSelect.h>
-
-class Compiler {
-public:
-    void compileToObjectFile(const std::string& inputFile,
-                           const std::string& outputFile) {
-        // 1. Parse
-        auto ast = parseFile(inputFile);
-        
-        // 2. Type check
-        TypeChecker checker;
-        checker.check(*ast);
-        
-        // 3. Generate LLVM IR
-        LLVMCodeGen codegen;
-        auto module = codegen.compile(*ast);
-        
-        // 4. Optimize
-        optimizeModule(*module);
-        
-        // 5. Generate machine code
-        emitObjectFile(*module, outputFile);
-    }
+void generateWhile(std::function<llvm::Value*()> condCode,
+                   std::function<void()> bodyCode) {
+    llvm::Function* func = builder.GetInsertBlock()->getParent();
     
-private:
-    void optimizeModule(llvm::Module& module) {
-        using namespace llvm;
-        
-        // Create optimization pipeline
-        PassBuilder PB;
-        LoopAnalysisManager LAM;
-        FunctionAnalysisManager FAM;
-        CGSCCAnalysisManager CGAM;
-        ModuleAnalysisManager MAM;
-        
-        // Register all analyses
-        PB.registerModuleAnalyses(MAM);
-        PB.registerCGSCCAnalyses(CGAM);
-        PB.registerFunctionAnalyses(FAM);
-        PB.registerLoopAnalyses(LAM);
-        PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
-        
-        // O3 optimization level
-        ModulePassManager MPM = 
-            PB.buildPerModuleDefaultPipeline(OptimizationLevel::O3);
-        
-        // Run optimizations
-        MPM.run(module, MAM);
-    }
+    llvm::BasicBlock* condBB = llvm::BasicBlock::Create(context, "while.cond", func);
+    llvm::BasicBlock* bodyBB = llvm::BasicBlock::Create(context, "while.body", func);
+    llvm::BasicBlock* exitBB = llvm::BasicBlock::Create(context, "while.exit", func);
     
-    void emitObjectFile(llvm::Module& module, 
-                       const std::string& filename) {
-        using namespace llvm;
-        
-        // Initialize targets
-        InitializeAllTargetInfos();
-        InitializeAllTargets();
-        InitializeAllTargetMCs();
-        InitializeAllAsmParsers();
-        InitializeAllAsmPrinters();
-        
-        // Get target triple
-        auto TargetTriple = sys::getDefaultTargetTriple();
-        module.setTargetTriple(TargetTriple);
-        
-        // Get target
-        std::string Error;
-        auto Target = TargetRegistry::lookupTarget(TargetTriple, Error);
-        
-        // Create target machine
-        auto CPU = "generic";
-        auto Features = "";
-        TargetOptions opt;
-        auto RM = Optional<Reloc::Model>();
-        auto TheTargetMachine = Target->createTargetMachine(
-            TargetTriple, CPU, Features, opt, RM);
-        
-        module.setDataLayout(TheTargetMachine->createDataLayout());
-        
-        // Emit object file
-        std::error_code EC;
-        raw_fd_ostream dest(filename, EC, sys::fs::OF_None);
-        
-        legacy::PassManager pass;
-        auto FileType = CGFT_ObjectFile;
-        
-        TheTargetMachine->addPassesToEmitFile(pass, dest, nullptr, FileType);
-        pass.run(module);
-        dest.flush();
-    }
-};
-```
-
-**Files to create:**
-- `src/llvm_codegen.h/cpp` - LLVM IR generation
-- `src/compiler.h/cpp` - Main compilation driver
-- `src/optimizer.cpp` - Optimization passes
-
----
-
-## Phase 3: Advanced Optimizations (4-8 weeks)
-
-### 3.1 Game-Specific Optimizations
-
-**Hot Loop Detection & Vectorization:**
-```cpp
-// Detect tight loops and vectorize them
-class LoopVectorizer {
-    void vectorizeLoop(llvm::Loop* L);
-};
-
-// Example: Vector operations on arrays
-for (int i = 0; i < positions.length; i++) {
-    positions[i].x += velocities[i].x * dt;
-    positions[i].y += velocities[i].y * dt;
-    positions[i].z += velocities[i].z * dt;
-}
-// → LLVM generates SIMD instructions (SSE/AVX/NEON)
-```
-
-**Devirtualization:**
-```cpp
-// Turn virtual calls into direct calls when type is known
-class Devirtualizer {
-    void devirtualize(CallExpr* call);
-};
-
-// Example:
-// virtual function call → direct function call
-enemy.takeDamage(10);  // If enemy type is known at compile-time
-```
-
-**Inlining Annotations:**
-```cpp
-// Use your @expose annotations to guide optimization
-class AnnotationOptimizer {
-    void processAnnotations(const ClassDecl* cls) {
-        for (auto& member : cls->members) {
-            for (auto& ann : member.annotations) {
-                if (ann.name == "inline_always") {
-                    // Force LLVM to inline this function
-                    setAlwaysInline(member);
-                }
-            }
-        }
-    }
-};
-```
-
-### 3.2 Escape Analysis & Stack Allocation
-```cpp
-// Allocate objects on stack instead of heap when possible
-class EscapeAnalyzer {
-    bool objectEscapes(const NewExpr* newExpr);
-    void promoteToStack(const NewExpr* newExpr);
-};
-
-// Example:
-void foo() {
-    Player p = new Player();  // Doesn't escape
-    p.health = 100;
-}
-// → Allocate Player on stack, not heap
-```
-
-### 3.3 Profile-Guided Optimization (PGO)
-```cpp
-// Instrument code to collect runtime profiles
-class ProfileInstrumenter {
-    void instrumentFunction(llvm::Function* F);
-};
-
-// Then recompile with profile data for better optimization
-```
-
----
-
-## Phase 4: JIT for Hot-Reloading (2-3 weeks)
-
-For development iteration speed, add JIT compilation:
-
-```cpp
-#include <llvm/ExecutionEngine/Orc/LLJIT.h>
-
-class JITCompiler {
-public:
-    JITCompiler() {
-        auto JIT = llvm::orc::LLJITBuilder().create();
-        jit = std::move(*JIT);
-    }
+    builder.CreateBr(condBB);
     
-    void* compileAndLoad(const std::string& source) {
-        // Parse & generate IR
-        auto module = compileToIR(source);
-        
-        // JIT compile
-        auto err = jit->addIRModule(
-            llvm::orc::ThreadSafeModule(
-                std::move(module), 
-                std::make_unique<llvm::LLVMContext>()
-            )
-        );
-        
-        // Get function pointer
-        auto symbol = jit->lookup("main");
-        return (void*)symbol->getAddress();
-    }
+    // Condition
+    builder.SetInsertPoint(condBB);
+    llvm::Value* cond = condCode();
+    builder.CreateCondBr(cond, bodyBB, exitBB);
     
-private:
-    std::unique_ptr<llvm::orc::LLJIT> jit;
-};
-```
-
-**Use cases:**
-- Live scripting in-editor
-- Hot-reload scripts without restarting game
-- Quick iteration during development
-
----
-
-## Phase 5: Runtime System (2-4 weeks)
-
-### 5.1 Garbage Collection (Optional)
-```cpp
-// Use LLVM's GC support
-class GarbageCollector {
-    void* allocate(size_t size);
-    void collect();
-    void markRoots();
-};
-```
-
-**Or use reference counting for deterministic cleanup:**
-```cpp
-class RefCounted {
-    std::atomic<int> refCount{0};
-public:
-    void addRef() { refCount++; }
-    void release() { 
-        if (--refCount == 0) delete this; 
-    }
-};
-```
-
-### 5.2 Native Interop
-```cpp
-// Call C++ functions from script
-class NativeBindings {
-    void registerFunction(const std::string& name, void* funcPtr) {
-        // Expose to LLVM IR generator
-        nativeFunctions[name] = funcPtr;
-    }
-};
-
-// Usage:
-bindings.registerFunction("GetDeltaTime", (void*)&Engine::getDeltaTime);
-bindings.registerFunction("SpawnEntity", (void*)&World::spawnEntity);
-```
-
-### 5.3 Multithreading Support
-```cpp
-// Generate thread-safe code
-class ThreadSafetyAnalyzer {
-    void checkDataRaces(const Program* ast);
-    void insertSynchronization(const Statement* stmt);
-};
-```
-
----
-
-## Phase 6: Platform-Specific Optimizations (Ongoing)
-
-### 6.1 SIMD Intrinsics
-```cpp
-// Expose SIMD operations to scripts
-@simd
-void processPositions(Vector3[] positions, Vector3[] velocities, float dt) {
-    for (int i = 0; i < positions.length; i += 4) {
-        // LLVM auto-vectorizes to SSE/AVX
-        positions[i]   += velocities[i]   * dt;
-        positions[i+1] += velocities[i+1] * dt;
-        positions[i+2] += velocities[i+2] * dt;
-        positions[i+3] += velocities[i+3] * dt;
-    }
+    // Body
+    builder.SetInsertPoint(bodyBB);
+    bodyCode();
+    builder.CreateBr(condBB);
+    
+    // Exit
+    builder.SetInsertPoint(exitBB);
 }
 ```
 
-### 6.2 Console-Specific Optimizations
+### Function Call
+
 ```cpp
-// PS5/Xbox-specific code generation
-if (targetPlatform == Platform::PS5) {
-    // Use PS5-specific SIMD instructions
-    usePS5SIMD();
-}
+// Direct call
+llvm::Function* callee = module->getFunction("myFunction");
+std::vector<llvm::Value*> args = {arg1, arg2, arg3};
+llvm::Value* result = builder.CreateCall(callee, args, "call");
+
+// Indirect call (function pointer)
+llvm::FunctionType* funcType = /* ... */;
+llvm::Value* result = builder.CreateCall(funcType, funcPtr, args);
+```
+
+### String Constant
+
+```cpp
+// Create global string constant
+llvm::Constant* strConstant = builder.CreateGlobalStringPtr("Hello, World!", "str");
+
+// Use with printf
+llvm::Function* printf = module->getFunction("printf");
+builder.CreateCall(printf, {strConstant});
+```
+
+### Select (Ternary Operator)
+
+```cpp
+// result = cond ? trueVal : falseVal
+llvm::Value* result = builder.CreateSelect(cond, trueVal, falseVal, "select");
 ```
 
 ---
 
-## Benchmarking & Performance Targets
+## Debugging & Verification
 
-### Realistic Performance Goals:
-- **Simple arithmetic:** 0.9-1.0x native C++ speed
-- **Function calls:** 0.8-0.95x native (with inlining)
-- **Object allocation:** 0.7-0.9x native (with escape analysis)
-- **Hot loops:** 0.95-1.0x native (with vectorization)
+### Verify Functions and Modules
 
-### Comparison to other languages:
-- **Lua (interpreted):** ~50-100x slower than native
-- **Lua (LuaJIT):** ~2-5x slower than native
-- **C# (Unity Burst):** ~0.9-1.0x native (similar to your approach)
-- **Rust/C++:** 1.0x native (baseline)
+```cpp
+#include <llvm/IR/Verifier.h>
 
----
+// Verify a function
+std::string error;
+llvm::raw_string_ostream errorStream(error);
+if (llvm::verifyFunction(*func, &errorStream)) {
+    llvm::errs() << "Function verification failed:\n" << error << "\n";
+}
 
-## Development Timeline
+// Verify entire module
+if (llvm::verifyModule(*module, &errorStream)) {
+    llvm::errs() << "Module verification failed:\n" << error << "\n";
+}
 
-### Assuming full-time work:
+// Verify and abort on error (for debugging)
+llvm::verifyFunction(*func, &llvm::errs());
+llvm::verifyModule(*module, &llvm::errs());
+```
 
-**Month 1-2: Semantic Analysis**
-- Type system
-- Symbol resolution
-- Basic error reporting
+### Print IR
 
-**Month 3-4: LLVM IR Generation**
-- Basic IR generation
-- Function compilation
-- Object file emission
+```cpp
+// Print to stdout
+module->print(llvm::outs(), nullptr);
+func->print(llvm::outs());
+bb->print(llvm::outs());
+inst->print(llvm::outs());
 
-**Month 5-6: Optimizations**
-- LLVM optimization passes
-- Inlining
-- Dead code elimination
+// Print to string
+std::string str;
+llvm::raw_string_ostream stream(str);
+module->print(stream, nullptr);
+llvm::outs() << str;
 
-**Month 7-8: Runtime System**
-- Memory management
-- Native interop
-- Standard library
+// Print to file
+std::error_code EC;
+llvm::raw_fd_ostream file("output.ll", EC);
+module->print(file, nullptr);
+```
 
-**Month 9-10: Advanced Features**
-- JIT compilation
-- Profile-guided optimization
-- Platform-specific optimizations
+### Dump Methods
 
-**Month 11-12: Polish & Testing**
-- Benchmarking
-- Bug fixes
-- Documentation
+```cpp
+// Dump to stderr (for debugging)
+module->dump();
+func->dump();
+bb->dump();
+inst->dump();
+value->dump();
+type->dump();
+```
 
----
+### View CFG
 
-## Recommended Learning Resources
+```cpp
+#include <llvm/Analysis/CFGPrinter.h>
 
-### Books:
-1. **"Engineering a Compiler"** by Cooper & Torczon
-   - Best book on optimizing compilers
-   
-2. **"Modern Compiler Implementation in C"** by Andrew Appel
-   - Practical compiler construction
+// View control flow graph in graphviz
+func->viewCFG();
 
-3. **"Crafting Interpreters"** by Bob Nystrom
-   - Great for understanding the basics
-
-### Online:
-1. **LLVM Tutorial (Kaleidoscope)**
-   - https://llvm.org/docs/tutorial/
-   - Build a JIT compiler step-by-step
-   
-2. **"Writing an LLVM Backend"**
-   - https://llvm.org/docs/WritingAnLLVMBackend.html
-   
-3. **Compiler Explorer**
-   - https://godbolt.org/
-   - See what optimized code looks like
-
-### Example Projects to Study:
-1. **Swift Compiler** - https://github.com/apple/swift
-   - LLVM-based, game-focused optimizations
-   
-2. **Julia** - https://github.com/JuliaLang/julia
-   - JIT compilation with LLVM, scientific computing
-   
-3. **Rust Compiler** - https://github.com/rust-lang/rust
-   - Advanced optimizations, LLVM backend
-   
-4. **Luau** (Roblox) - https://github.com/Roblox/luau
-   - Bytecode + JIT for game scripting
+// Or write to .dot file
+func->viewCFGOnly();  // simplified view
+```
 
 ---
 
-## Next Immediate Steps
+## Quick Reference Cheat Sheet
 
-1. **Install LLVM 18**
-2. **Create type system** (`src/types.h`)
-3. **Build symbol table** (`src/symbol_table.h`)
-4. **Write type checker** (`src/type_checker.cpp`)
-5. **Start LLVM codegen** (`src/llvm_codegen.cpp`)
+```cpp
+// Create context & module
+llvm::LLVMContext context;
+auto module = std::make_unique<llvm::Module>("name", context);
+llvm::IRBuilder<> builder(context);
 
-Then I can help you implement each phase in detail!
+// Types
+auto i32 = builder.getInt32Ty();
+auto f64 = builder.getDoubleTy();
+auto ptr = builder.getPtrTy();
+auto voidTy = builder.getVoidTy();
+
+// Constants
+auto zero = builder.getInt32(0);
+auto pi = llvm::ConstantFP::get(f64, 3.14);
+auto nullPtr = llvm::ConstantPointerNull::get(ptr);
+
+// Function
+auto funcTy = llvm::FunctionType::get(returnType, {paramTypes}, false);
+auto func = llvm::Function::Create(funcTy, llvm::Function::ExternalLinkage, "name", module.get());
+
+// Basic blocks
+auto bb = llvm::BasicBlock::Create(context, "name", func);
+builder.SetInsertPoint(bb);
+
+// Instructions
+auto add = builder.CreateAdd(lhs, rhs);
+auto cmp = builder.CreateICmpEQ(lhs, rhs);
+auto call = builder.CreateCall(callee, {args});
+auto alloca = builder.CreateAlloca(type);
+auto load = builder.CreateLoad(type, ptr);
+builder.CreateStore(val, ptr);
+builder.CreateRet(val);
+builder.CreateBr(targetBB);
+builder.CreateCondBr(cond, thenBB, elseBB);
+
+// Verify
+llvm::verifyFunction(*func);
+llvm::verifyModule(*module);
+
+// Print
+module->print(llvm::outs(), nullptr);
+```
+
+---
+
+## Further Reading
+
+- **Official LLVM Programmer's Manual**: https://llvm.org/docs/ProgrammersManual.html
+- **LLVM Language Reference**: https://llvm.org/docs/LangRef.html
+- **Kaleidoscope Tutorial**: https://llvm.org/docs/tutorial/
+- **LLVM Doxygen**: https://llvm.org/doxygen/
+
+This guide covers 90% of what you need for building a compiler. Experiment, read the generated IR, and iterate!

@@ -52,20 +52,20 @@ TEST(parser_annotation_simple) {
 
 TEST(parser_annotation_multiple_args) {
     const char* source = 
-        "@expose(min=0, max=100, step=1, tooltip=\"Health value\", group=\"Stats\")\n"
-        "private int32 health = 100;\n";
+        "class Test {\n"
+        "    @expose(min=0, max=100, step=1, tooltip=\"Health value\", group=\"Stats\")\n"
+        "    private int32 health = 100;\n"
+        "}\n";
     
     auto prog = parseSource(source);
     
     auto* cls = getStmt<ClassDecl>(*prog);
-    if (cls) {
-        // If parsed as part of a class
-        EXPECT_SIZE(cls->members, 1);
-        auto& member = cls->members[0];
-        EXPECT_SIZE(member.annotations, 1);
-        EXPECT_EQ(member.annotations[0].name, std::string("expose"));
-        EXPECT_SIZE(member.annotations[0].args, 5);
-    }
+    EXPECT_TRUE(cls != nullptr);
+    EXPECT_SIZE(cls->members, 1);
+    auto& member = cls->members[0];
+    EXPECT_SIZE(member.annotations, 1);
+    EXPECT_EQ(member.annotations[0].name, std::string("expose"));
+    EXPECT_SIZE(member.annotations[0].args, 5);
 }
 
 TEST(parser_annotation_with_array_value) {

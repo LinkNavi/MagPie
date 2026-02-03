@@ -45,8 +45,24 @@ enum class SymbolKind {
     Enum,           // enum declaration
     EnumEntry,      // a single entry inside an enum
     Import,         // brought in by #include
-    BuiltinFunc,    // engine-provided function (e.g. Print)
+    BuiltinFunc,    // core-provided function (e.g. Print)
 };
+
+inline std::ostream& operator<<(std::ostream& os, SymbolKind kind) {
+    switch (kind) {
+        case SymbolKind::Variable: return os << "Variable";
+        case SymbolKind::Constant: return os << "Constant";
+        case SymbolKind::Function: return os << "Function";
+        case SymbolKind::Parameter: return os << "Parameter";
+        case SymbolKind::Class: return os << "Class";
+        case SymbolKind::Struct: return os << "Struct";
+        case SymbolKind::Enum: return os << "Enum";
+        case SymbolKind::EnumEntry: return os << "EnumEntry";
+        case SymbolKind::Import: return os << "Import";
+        case SymbolKind::BuiltinFunc: return os << "BuiltinFunc";
+    }
+    return os << "<Unknown>";
+}
 
 // ============================================================
 // Symbol — one entry in a scope frame
@@ -215,7 +231,7 @@ private:
     /// Flat list of imported symbols (file-scope visibility).
     std::vector<Symbol> imports_;
 
-    /// Populate the Builtin scope with engine-provided names.
+    /// Populate the Builtin scope with core-provided names.
     void initBuiltins();
 };
 
@@ -230,13 +246,13 @@ inline SymbolTable::SymbolTable() {
 }
 
 inline void SymbolTable::initBuiltins() {
-    // These are the functions that #include <engine/console> etc.
+    // These are the functions that #include <core/console> etc.
     // will expose.  We pre-declare them here so that if the user
     // forgets the #include we can still give a good error ("did
-    // you mean Print? (requires #include <engine/console>)").
+    // you mean Print? (requires #include <core/console>)").
     //
     // For now we just register the names; the actual types will be
-    // filled in properly once we have the engine header stubs.
+    // filled in properly once we have the core header stubs.
     // Mark them as BuiltinFunc so the checker knows not to warn
     // about them being "unused".
 

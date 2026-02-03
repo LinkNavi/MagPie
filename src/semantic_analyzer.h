@@ -6,7 +6,7 @@
 // (and wraps) the type checker.
 //
 // Responsibilities (in order):
-//   1. Process #include directives: resolve engine headers and
+//   1. Process #include directives: resolve core headers and
 //      populate the symbol table with the names they export.
 //   2. Pre-register all top-level declarations (classes, structs,
 //      enums, functions) so that forward references resolve.
@@ -40,10 +40,10 @@
 namespace scriptlang {
 
 // ============================================================
-// EngineHeaderRegistry — stub database of what each engine
+// EngineHeaderRegistry — stub database of what each core
 // header exports.
 //
-// In a real engine this would be populated from actual C++ header
+// In a real core this would be populated from actual C++ header
 // files or a schema.  For now it's a hand-written table that
 // matches the headers referenced in the test .mp files.
 // ============================================================
@@ -56,7 +56,7 @@ public:
     };
 
     struct Header {
-        std::string                path;    // e.g. "engine/console"
+        std::string                path;    // e.g. "core/console"
         std::vector<ExportedSymbol> exports;
     };
 
@@ -83,15 +83,15 @@ private:
 
     void initHeaders() {
         // --------------------------------------------------------
-        // engine/console  — Print, Log, Warn, Error
+        // core/console  — Print, Log, Warn, Error
         // --------------------------------------------------------
         {
             // Print and Log are variadic: (...auto) -> void
             std::vector<TypePtr> variadicParams = { types_.Auto() };
             TypePtr printType = types_.makeFunction(variadicParams, types_.Void(), /*variadic=*/true);
 
-            headers_["engine/console"] = Header{
-                "engine/console",
+            headers_["core/console"] = Header{
+                "core/console",
                 {
                     { "Print", SymbolKind::BuiltinFunc, printType },
                     { "Log",   SymbolKind::BuiltinFunc, printType },
@@ -102,11 +102,11 @@ private:
         }
 
         // --------------------------------------------------------
-        // engine/time  — DeltaTime, FixedDeltaTime, Time
+        // core/time  — DeltaTime, FixedDeltaTime, Time
         // --------------------------------------------------------
         {
-            headers_["engine/time"] = Header{
-                "engine/time",
+            headers_["core/time"] = Header{
+                "core/time",
                 {
                     { "DeltaTime",      SymbolKind::Variable, types_.Float64() },
                     { "FixedDeltaTime", SymbolKind::Variable, types_.Float64() },
@@ -116,11 +116,11 @@ private:
         }
 
         // --------------------------------------------------------
-        // engine/physics  — stub exports
+        // core/physics  — stub exports
         // --------------------------------------------------------
         {
-            headers_["engine/physics"] = Header{
-                "engine/physics",
+            headers_["core/physics"] = Header{
+                "core/physics",
                 {
                     // Gravity constant
                     { "Gravity", SymbolKind::Constant, types_.Float64() },
@@ -129,7 +129,7 @@ private:
         }
 
         // --------------------------------------------------------
-        // engine/math  — common math functions
+        // core/math  — common math functions
         // --------------------------------------------------------
         {
             std::vector<TypePtr> f64x1 = { types_.Float64() };
@@ -137,8 +137,8 @@ private:
             TypePtr f64_to_f64  = types_.makeFunction(f64x1, types_.Float64());
             TypePtr f64x2_to_f64 = types_.makeFunction(f64x2, types_.Float64());
 
-            headers_["engine/math"] = Header{
-                "engine/math",
+            headers_["core/math"] = Header{
+                "core/math",
                 {
                     { "Abs",   SymbolKind::BuiltinFunc, f64_to_f64 },
                     { "Sqrt",  SymbolKind::BuiltinFunc, f64_to_f64 },
@@ -264,7 +264,7 @@ inline void SemanticAnalyzer::resolveIncludes(const Program& program) {
 inline void SemanticAnalyzer::processInclude(const IncludeDecl* inc) {
     const auto* header = registry_.lookup(inc->path);
     if (!header) {
-        diags_.error("Unknown engine header '<" + inc->path + ">'", inc->loc);
+        diags_.error("Unknown core header '<" + inc->path + ">'", inc->loc);
 
         // Suggest similar paths
         auto allPaths = registry_.allPaths();

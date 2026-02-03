@@ -378,19 +378,26 @@ inline void TypeChecker::checkFunctionDecl(const FunctionDecl* func) {
 
     TypePtr funcType = types_.makeFunction(paramTypes, retType, isVariadic);
 
-    // Declare the function name in the CURRENT (enclosing) scope
-    Symbol sym;
-    sym.name     = func->name;
-    sym.kind     = SymbolKind::Function;
-    sym.type     = funcType;
-    sym.declNode = func;
-    sym.loc      = func->loc;
-    sym.isPublic = func->isPublic;
-    sym.isStatic = func->isStatic;
+    // Check if function was pre-registered by SemanticAnalyzer
+    Symbol* existing = symbols_.lookupMut(func->name);
+    if (existing && existing->declNode == func) {
+        // Update the type with our refined version
+        existing->type = funcType;
+    } else {
+        // Declare the function name in the CURRENT (enclosing) scope
+        Symbol sym;
+        sym.name     = func->name;
+        sym.kind     = SymbolKind::Function;
+        sym.type     = funcType;
+        sym.declNode = func;
+        sym.loc      = func->loc;
+        sym.isPublic = func->isPublic;
+        sym.isStatic = func->isStatic;
 
-    if (!symbols_.declare(sym)) {
-        // Overloading not supported yet — report redeclaration
-        diags_.error("Redeclaration of function '" + func->name + "'", func->loc);
+        if (!symbols_.declare(sym)) {
+            // Overloading not supported yet — report redeclaration
+            diags_.error("Redeclaration of function '" + func->name + "'", func->loc);
+        }
     }
 
     stmtTypes_[func] = funcType;

@@ -458,7 +458,7 @@ inline bool Type::structurallyEqual(const Type& other) const {
 // ============================================================
 
 inline TypePtr TypeContext::allocType(TypeKind kind) {
-    auto t = std::make_shared<Type>();
+    auto t = std::shared_ptr<Type>(new Type());
     t->kind = kind;
     return t;
 }

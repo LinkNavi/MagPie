@@ -7,6 +7,21 @@ project('scriptlang', 'cpp',
 )
 
 # ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+# LLVM dependency - finds LLVM via llvm-config
+llvm_dep = dependency('llvm', version: '>=14.0', modules: [
+    'core',
+    'support',
+    'irreader',
+    'analysis',
+    'executionengine',
+    'target',
+    'mcjit',
+    'native',
+])
+
+# ---------------------------------------------------------------------------
 # Amalgamation — combines all src/*.h into a single scriptlang.h
 # This runs as a custom command during the build step.
 # The output lands in build/include/scriptlang.h
@@ -27,8 +42,9 @@ source_headers = files(
     'src/semantic_analyzer.h',
     'src/lexer.h',
     'src/parser.h',
+    'src/codegen.h',
 )
-llvm_dep = dependency('llvm', version: '>=18.0')
+
 amalgamated_header = custom_target(
     'scriptlang.h',
     input:   source_headers,
@@ -44,6 +60,7 @@ scriptlang_dep = declare_dependency(
     link_whole: [],
     sources: [amalgamated_header],
     include_directories: [include_directories('.')],
+    dependencies: [llvm_dep],
 )
 
 # ---------------------------------------------------------------------------
@@ -55,7 +72,7 @@ scriptlang_dep = declare_dependency(
 test_sources = files(
     'tests/test_lexer.cpp',
     'tests/test_parser.cpp',
-    'tests/test_semantic.cpp',  # <-- Add this line
+    'tests/test_semantic.cpp',
 )
 
 test_exe = executable(
@@ -79,5 +96,19 @@ test('scriptlang tests', test_exe)
 debug_exe = executable(
     'scriptlang_debug',
     sources: ['tools/debug_dump.cpp'],
+    dependencies: [scriptlang_dep],
+)
+
+# ---------------------------------------------------------------------------
+# IR Dump tool - Test LLVM IR generation
+# Compiles a .sl source file and outputs LLVM IR to stdout
+#
+# Usage after building:
+#     ./build/scriptlang_ir  path/to/script.sl
+#     ./build/scriptlang_ir  path/to/script.sl > output.ll
+# ---------------------------------------------------------------------------
+ir_dump_exe = executable(
+    'scriptlang_ir',
+    sources: ['tools/ir_dump.cpp'],
     dependencies: [scriptlang_dep],
 )
