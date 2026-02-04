@@ -1,13 +1,6 @@
 #ifndef CODEGEN_H
 #define CODEGEN_H
 
-// ------------------------------------------------------------
-// codegen.h - LLVM IR code generator for ScriptLang
-//
-// Takes a fully-typed, analyzed AST and emits LLVM IR.
-// Supports both JIT (for hot-reload) and AOT (for shipping).
-// ------------------------------------------------------------
-
 #include "ast.h"
 #include "symbol_table.h"
 #include "types.h"

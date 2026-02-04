@@ -1,27 +1,6 @@
 #ifndef SYMBOL_TABLE_H
 #define SYMBOL_TABLE_H
 
-// ------------------------------------------------------------
-// symbol_table.h — Scoped symbol tables for ScriptLang.
-//
-// A SymbolTable is a stack of Scope frames.  Each Scope is a
-// flat hash map.  Looking up a name walks the stack from the
-// innermost (current) scope outward — standard lexical scoping.
-//
-// Design notes:
-//   • Symbols are cheap value structs stored directly in the map
-//     (no heap allocation per symbol beyond the map bucket).
-//   • The AST node pointer in Symbol is raw — it points into the
-//     AST tree that must outlive the symbol table.  That's fine
-//     because both live for the lifetime of one compilation.
-//   • "Class scope" is a special named scope that the type checker
-//     pushes when it enters a class/struct body.  Member lookup
-//     and `this` resolution consult it.
-//   • Includes are modelled as a flat list of "imported names"
-//     that are visible at file scope.  The semantic analyzer
-//     populates this when it processes IncludeDecl nodes.
-// ------------------------------------------------------------
-
 #include "types.h"
 #include "ast.h"
 

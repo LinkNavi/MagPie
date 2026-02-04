@@ -1,17 +1,7 @@
 #ifndef PARSER_H
 #define PARSER_H
 
-// ------------------------------------------------------------
-// parser.h — Recursive-descent parser (IMPROVED VERSION).
-//
-// IMPROVEMENTS:
-// - Fixed annotation parsing to properly handle nested arrays and complex
-// values
-// - Better error recovery and synchronization
-// - Support for all syntax features in syntax.mp and docs.mp
-// - Improved handling of visibility modifiers and annotations
-// - Better lookahead for disambiguating constructs
-// ------------------------------------------------------------
+
 
 #include "ast.h"
 #include "lexer.h"

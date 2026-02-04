@@ -9,26 +9,6 @@
 #include <unordered_map>
 #include <cctype>
 
-// ------------------------------------------------------------
-// lexer.h — Tokenizes source code into a stream of Tokens.
-//
-// UPDATED: Enhanced with game-dev friendly features:
-// - Hex/binary integer literals (0xFF, 0b1010)
-// - Scientific notation (1.5e-3)
-// - Character literals ('a', '\n')
-// - Raw strings with backticks (`raw text`)
-// - String interpolation markers ($)
-// - Lambda arrow (=>)
-// - Range operators (.., ...)
-// - 'in' keyword for for-in loops
-//
-// Usage:
-//     scriptlang::Lexer lexer(sourceCode);
-//     auto tokens = lexer.tokenize();
-//     // tokens is a std::vector<Token>, always ending with Eof.
-//     // If any token has type Error, its value field contains
-//     // the error message.
-// ------------------------------------------------------------
 
 namespace scriptlang {
 

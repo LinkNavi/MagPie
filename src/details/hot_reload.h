@@ -1,5 +1,4 @@
-// hot_reload.h - Advanced hot-reload system with state preservation
-// for ScriptLang JIT compiler
+
 
 #ifndef HOT_RELOAD_H
 #define HOT_RELOAD_H
@@ -42,9 +41,7 @@ public:
             return state;
         }
         
-        // Call it (returns a pointer to serialized data)
-        // In practice, you'd define a protocol for this
-        // For example, return JSON or a binary format
+    
         
         // Placeholder implementation
         return state;
@@ -353,81 +350,10 @@ bool success = jit_.reloadModule(moduleName, sourceCode);
     }
 };
 
-// ============================================================
-// Example: Integration with ImGui for editor
-// ============================================================
-#if 0
-// This shows how you'd integrate with an editor UI
 
-void renderHotReloadPanel(HotReloadManager& reloadMgr) {
-    ImGui::Begin("Hot Reload");
-    
-    auto stats = reloadMgr.getStats();
-    
-    ImGui::Text("Total Reloads: %zu", stats.totalReloads);
-    ImGui::Text("Successful: %zu", stats.successfulReloads);
-    ImGui::Text("Failed: %zu", stats.failedReloads);
-    ImGui::Text("Avg Reload Time: %lldms", stats.averageReloadTime.count());
-    
-    ImGui::Separator();
-    
-    if (ImGui::Button("Check for Changes Now")) {
-        reloadMgr.checkForChanges();
-    }
-    
-    ImGui::End();
-}
-#endif
 
 } // namespace scriptlang
 
 #endif // HOT_RELOAD_H
 
-/* ============================================================
-   USAGE EXAMPLE
-   ============================================================
 
-#include "hot_reload.h"
-
-int main() {
-    JITCompiler jit;
-    jit.initialize();
-    
-    HotReloadManager reloadMgr(jit);
-    
-    // Register scripts for hot-reload
-    reloadMgr.registerScript("PlayerController", "scripts/PlayerController.sl");
-    reloadMgr.registerScript("EnemyAI", "scripts/EnemyAI.sl");
-    
-    // Set up notification callback
-    reloadMgr.setReloadCallback([](const std::string& name, bool success) {
-        if (success) {
-            std::cout << "✓ " << name << " reloaded successfully" << std::endl;
-        } else {
-            std::cerr << "✗ " << name << " reload failed" << std::endl;
-        }
-    });
-    
-    // Start watching in background
-    reloadMgr.startWatching();
-    
-    // Game loop
-    while (running) {
-        // Or manually check each frame:
-        // reloadMgr.checkForChanges();
-        
-        update();
-        render();
-    }
-    
-    reloadMgr.stopWatching();
-    
-    // Print statistics
-    auto stats = reloadMgr.getStats();
-    std::cout << "Reload stats: " << stats.totalReloads << " total" << std::endl;
-    
-    return 0;
-}
-
-   ============================================================
-*/

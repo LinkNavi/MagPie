@@ -5,20 +5,6 @@
 #include <string_view>
 #include <ostream>
 
-// ------------------------------------------------------------
-// token.h — Token types and the Token struct.
-// This is what the lexer emits. Everything downstream (parser,
-// semantic analysis) consumes this.
-// 
-// UPDATED: Added game-dev friendly features:
-// - Lambda arrow (=>)
-// - Range operators (.., ...)
-// - String interpolation ($)
-// - Raw strings (backtick)
-// - Collection literals
-// - Hex/binary number literals
-// ------------------------------------------------------------
-
 namespace scriptlang {
 
 // All token types the lexer can produce.

@@ -1,31 +1,6 @@
 #ifndef TYPE_CHECKER_H
 #define TYPE_CHECKER_H
 
-// ------------------------------------------------------------
-// type_checker.h — Type inference and checking pass.
-//
-// Responsibilities:
-//   1. Infer the type of every Expression node in the AST.
-//   2. Check that operators, assignments, calls, and returns
-//      are type-compatible.
-//   3. Populate the exprTypes_ map so that later passes (IR
-//      codegen) can look up "what type does this expression have?"
-//      in O(1).
-//   4. Emit diagnostics (errors / warnings) into the shared
-//      Diagnostic list.
-//
-// Usage:
-//     TypeContext  types;
-//     SymbolTable  symbols;
-//     Diagnostics  diags;
-//     TypeChecker  checker(types, symbols, diags);
-//     checker.check(program);
-//     // diags now contains any errors; exprTypes() is populated.
-//
-// The checker does a single DFS over the AST.  It does NOT modify
-// the tree — it only reads it and writes into its own maps.
-// ------------------------------------------------------------
-
 #include "ast.h"
 #include "types.h"
 #include "symbol_table.h"

@@ -1,4 +1,4 @@
-// arena.h - Header-only arena allocator
+
 #ifndef ARENA_H
 #define ARENA_H
 
@@ -11,7 +11,7 @@ struct Arena {
     size_t capacity;
 };
 
-// Globals - define in ONE .cpp file with ARENA_IMPLEMENTATION
+
 
 #ifdef ARENA_IMPLEMENTATION
 Arena* g_frame_arena = nullptr;

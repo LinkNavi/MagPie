@@ -3,7 +3,6 @@
 
 // ------------------------------------------------------------
 // ast.h — Abstract Syntax Tree node definitions.
-// FIXED: Corrected Annotation structure to use string for values
 // ------------------------------------------------------------
 
 #include <string>

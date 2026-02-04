@@ -1,11 +1,3 @@
-// ============================================================
-// ScriptLang Frontend - Enhanced Game Engine Integration
-// ============================================================
-// LSP-Ready Design:
-// - Type registry for autocomplete
-// - Component metadata for introspection
-// - Function signatures for hover/completion
-// - Documentation strings attached to bindings
 //
 // Usage:
 //     #define SCRIPTLANG_IMPLEMENTATION

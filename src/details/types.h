@@ -1,28 +1,6 @@
 #ifndef TYPES_H
 #define TYPES_H
 
-// ------------------------------------------------------------
-// types.h — The complete type system for ScriptLang.
-//
-// Design goals:
-//   1. Every type is heap-allocated exactly once and shared via
-//      shared_ptr.  TypeContext is the factory/intern table — two
-//      types that are structurally identical will always be the
-//      same pointer, so equality checks are O(1).
-//   2. The enum TypeKind mirrors the token-level primitives the
-//      lexer already knows (int8 … float64, bool, string) and
-//      adds the compound forms the semantic pass needs.
-//   3. Nothing here depends on AST nodes.  The type checker owns
-//      the mapping from AST → Type.
-//
-// How to add a new type later:
-//   - Add a TypeKind enumerator.
-//   - Add any extra fields you need to the Type struct (or a
-//     sub-struct).
-//   - Add a factory method to TypeContext.
-//   - Update displayName() so error messages stay readable.
-// ------------------------------------------------------------
-
 #include <string>
 #include <vector>
 #include <memory>

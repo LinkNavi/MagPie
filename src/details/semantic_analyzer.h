@@ -1,30 +1,6 @@
 #ifndef SEMANTIC_ANALYZER_H
 #define SEMANTIC_ANALYZER_H
 
-// ------------------------------------------------------------
-// semantic_analyzer.h — The orchestrator pass that runs before
-// (and wraps) the type checker.
-//
-// Responsibilities (in order):
-//   1. Process #include directives: resolve core headers and
-//      populate the symbol table with the names they export.
-//   2. Pre-register all top-level declarations (classes, structs,
-//      enums, functions) so that forward references resolve.
-//      This is a "name-only" pass — no bodies are checked yet.
-//   3. Run the TypeChecker (which does the full DFS and fills in
-//      exprTypes / stmtTypes).
-//   4. Post-checks: unused symbols, annotation validation,
-//      lifecycle hook validation.
-//
-// Usage:
-//     SemanticAnalyzer analyzer;
-//     auto result = analyzer.analyze(program);
-//     if (result.hasErrors()) { … print diagnostics … }
-//
-// The analyzer owns its TypeContext, SymbolTable, and
-// Diagnostics.  They are accessible after analysis for
-// downstream passes (IR codegen).
-// ------------------------------------------------------------
 
 #include "ast.h"
 #include "types.h"
